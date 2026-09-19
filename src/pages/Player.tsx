@@ -17,40 +17,152 @@ type RoomGameState = Room & {
   round_player_ids?: string[] | null
 }
 
-export default function Player() {
-  const { code = '' } = useParams()
+const normalizeQuestion = (
+  value: unknown
+): Question => {
+  const raw = value as Question & {
+    options?: unknown[]
+  }
 
-  const [name, setName] = useState('')
-  const [me, setMe] = useState<PlayerType | null>(null)
-  const [room, setRoom] = useState<Room | null>(null)
-  const [players, setPlayers] = useState<PlayerType[]>([])
-  const [question, setQuestion] = useState<Question | null>(null)
-  const [answers, setAnswers] = useState<Answer[]>([])
-  const [comment, setComment] = useState('')
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+  const normalized = Array.isArray(raw.options)
+    ? raw.options.map((option, index) => {
+        if (typeof option === 'string') {
+          return {
+            id:
+              index === 0
+                ? 'A'
+                : index === 1
+                  ? 'B'
+                  : String(index + 1),
+            label: option,
+          }
+        }
+
+        if (
+          option &&
+          typeof option === 'object'
+        ) {
+          const object =
+            option as {
+              id?: unknown
+              label?: unknown
+            }
+
+          return {
+            id:
+              typeof object.id === 'string'
+                ? object.id
+                : index === 0
+                  ? 'A'
+                  : index === 1
+                    ? 'B'
+                    : String(index + 1),
+            label:
+              typeof object.label === 'string'
+                ? object.label
+                : '',
+          }
+        }
+
+        return {
+          id: String(index + 1),
+          label: '',
+        }
+      })
+    : []
+
+  return {
+    ...raw,
+    options: normalized,
+  } as Question
+}
+
+export default function Player() {
+  const { code = '' } =
+    useParams()
+
+  const [name, setName] =
+    useState('')
+
+  const [me, setMe] =
+    useState<PlayerType | null>(
+      null
+    )
+
+  const [room, setRoom] =
+    useState<Room | null>(
+      null
+    )
+
+  const [
+    players,
+    setPlayers,
+  ] =
+    useState<PlayerType[]>(
+      []
+    )
+
+  const [
+    question,
+    setQuestion,
+  ] =
+    useState<Question | null>(
+      null
+    )
+
+  const [
+    answers,
+    setAnswers,
+  ] =
+    useState<Answer[]>([])
+
+  const [
+    comment,
+    setComment,
+  ] = useState('')
+
+  const [
+    error,
+    setError,
+  ] = useState('')
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true)
 
   const storageKey =
     `erxuanyi_player_${code}`
 
-  const myAnswer = useMemo(() => {
-    if (!me) return undefined
+  const myAnswer =
+    useMemo(() => {
+      if (!me) {
+        return undefined
+      }
 
-    return answers.find(
-      answer =>
-        answer.player_id === me.id
-    )
-  }, [answers, me])
+      return answers.find(
+        answer =>
+          answer.player_id ===
+          me.id
+      )
+    }, [
+      answers,
+      me,
+    ])
 
   const joined =
-    Boolean(me && room)
+    Boolean(
+      me &&
+      room
+    )
 
   const currentRoundPlayerIds =
     (
       room as
         | RoomGameState
         | null
-    )?.round_player_ids ?? []
+    )?.round_player_ids ??
+    []
 
   const isCurrentRoundPlayer =
     Boolean(
@@ -61,17 +173,19 @@ export default function Player() {
     )
 
   const currentRoundPlayers =
-    players.filter(player =>
-      currentRoundPlayerIds.includes(
-        player.id
-      )
+    players.filter(
+      player =>
+        currentRoundPlayerIds.includes(
+          player.id
+        )
     )
 
   const currentRoundAnswers =
-    answers.filter(answer =>
-      currentRoundPlayerIds.includes(
-        answer.player_id
-      )
+    answers.filter(
+      answer =>
+        currentRoundPlayerIds.includes(
+          answer.player_id
+        )
     )
 
   const refresh = async (
@@ -80,11 +194,15 @@ export default function Player() {
   ) => {
     const {
       data: roomData,
-      error: roomError,
+      error:
+        roomError,
     } = await supabase
       .from('rooms')
       .select('*')
-      .eq('id', roomId)
+      .eq(
+        'id',
+        roomId
+      )
       .maybeSingle()
 
     if (
@@ -108,23 +226,33 @@ export default function Player() {
     const nextRoom =
       roomData as Room
 
-    setRoom(nextRoom)
+    setRoom(
+      nextRoom
+    )
 
-    const { data: playerData } =
-      await supabase
-        .from('players')
-        .select('*')
-        .eq(
-          'room_id',
-          roomId
-        )
-        .order('joined_at')
+    const {
+      data:
+        playerData,
+    } = await supabase
+      .from('players')
+      .select('*')
+      .eq(
+        'room_id',
+        roomId
+      )
+      .order(
+        'joined_at'
+      )
 
     const nextPlayers =
-      (playerData ??
-        []) as PlayerType[]
+      (
+        playerData ??
+        []
+      ) as PlayerType[]
 
-    setPlayers(nextPlayers)
+    setPlayers(
+      nextPlayers
+    )
 
     if (player) {
       const stillExists =
@@ -134,8 +262,12 @@ export default function Player() {
             player.id
         )
 
-      if (stillExists) {
-        setMe(player)
+      if (
+        stillExists
+      ) {
+        setMe(
+          player
+        )
       } else {
         localStorage.removeItem(
           storageKey
@@ -149,9 +281,12 @@ export default function Player() {
       nextRoom.current_question_id
     ) {
       const {
-        data: questionData,
+        data:
+          questionData,
       } = await supabase
-        .from('questions')
+        .from(
+          'questions'
+        )
         .select('*')
         .eq(
           'id',
@@ -161,12 +296,15 @@ export default function Player() {
 
       setQuestion(
         questionData
-          ? (questionData as Question)
+          ? normalizeQuestion(
+              questionData
+            )
           : null
       )
 
       const {
-        data: answerData,
+        data:
+          answerData,
       } = await supabase
         .from('answers')
         .select('*')
@@ -178,11 +316,15 @@ export default function Player() {
           'question_id',
           nextRoom.current_question_id
         )
-        .order('created_at')
+        .order(
+          'created_at'
+        )
 
       setAnswers(
-        (answerData ??
-          []) as Answer[]
+        (
+          answerData ??
+          []
+        ) as Answer[]
       )
     } else {
       setQuestion(null)
@@ -192,9 +334,6 @@ export default function Player() {
     setLoading(false)
   }
 
-  /*
-   * 恢复玩家身份
-   */
   useEffect(() => {
     const saved =
       localStorage.getItem(
@@ -225,72 +364,81 @@ export default function Player() {
     }
   }, [code])
 
-  /*
-   * Realtime
-   */
   useEffect(() => {
-    if (!room) return
+    if (!room) {
+      return
+    }
 
     const roomId =
       room.id
 
-    const channel = supabase
-      .channel(
-        `player-live-${roomId}`
-      )
+    const channel =
+      supabase
+        .channel(
+          `player-live-${roomId}`
+        )
 
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'rooms',
-          filter:
-            `id=eq.${roomId}`,
-        },
-        () => {
-          void refresh(
-            roomId,
-            me ?? undefined
-          )
-        }
-      )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema:
+              'public',
+            table:
+              'rooms',
+            filter:
+              `id=eq.${roomId}`,
+          },
+          () => {
+            void refresh(
+              roomId,
+              me ??
+                undefined
+            )
+          }
+        )
 
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'players',
-          filter:
-            `room_id=eq.${roomId}`,
-        },
-        () => {
-          void refresh(
-            roomId,
-            me ?? undefined
-          )
-        }
-      )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema:
+              'public',
+            table:
+              'players',
+            filter:
+              `room_id=eq.${roomId}`,
+          },
+          () => {
+            void refresh(
+              roomId,
+              me ??
+                undefined
+            )
+          }
+        )
 
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'answers',
-          filter:
-            `room_id=eq.${roomId}`,
-        },
-        () => {
-          void refresh(
-            roomId,
-            me ?? undefined
-          )
-        }
-      )
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema:
+              'public',
+            table:
+              'answers',
+            filter:
+              `room_id=eq.${roomId}`,
+          },
+          () => {
+            void refresh(
+              roomId,
+              me ??
+                undefined
+            )
+          }
+        )
 
-      .subscribe()
+        .subscribe()
 
     return () => {
       void supabase.removeChannel(
@@ -303,242 +451,273 @@ export default function Player() {
     me?.id,
   ])
 
-  /*
-   * 加入房间
-   * 现在游戏开始后也允许加入。
-   */
-  const join = async () => {
-    const cleanName =
-      name.trim()
+  const join =
+    async () => {
+      const cleanName =
+        name.trim()
 
-    if (!cleanName) return
-
-    setError('')
-
-    const {
-      data: roomData,
-      error: roomError,
-    } = await supabase
-      .from('rooms')
-      .select('*')
-      .eq('code', code)
-      .maybeSingle()
-
-    if (
-      roomError ||
-      !roomData
-    ) {
-      setError(
-        '房间不存在'
-      )
-      return
-    }
-
-    const targetRoom =
-      roomData as Room
-
-    if (
-      targetRoom.phase ===
-      'ended'
-    ) {
-      setError(
-        '这个房间已经结束'
-      )
-      return
-    }
-
-    const {
-      data:
-        existingPlayers,
-    } = await supabase
-      .from('players')
-      .select('avatar')
-      .eq(
-        'room_id',
-        targetRoom.id
-      )
-
-    if (
-      (
-        existingPlayers
-          ?.length ?? 0
-      ) >= 20
-    ) {
-      setError(
-        '房间已经满员'
-      )
-      return
-    }
-
-    const usedAvatars =
-      new Set(
-        (
-          existingPlayers ??
-          []
-        ).map(
-          player =>
-            player.avatar
-        )
-      )
-
-    const freeAvatars =
-      Array.from(
-        {
-          length: 20,
-        },
-        (_, index) =>
-          index
-      ).filter(
-        index =>
-          !usedAvatars.has(
-            index
-          )
-      )
-
-    if (
-      !freeAvatars.length
-    ) {
-      setError(
-        '暂时没有可用头像'
-      )
-      return
-    }
-
-    const avatar =
-      freeAvatars[
-        Math.floor(
-          Math.random() *
-            freeAvatars.length
-        )
-      ]
-
-    const {
-      data: playerData,
-      error: playerError,
-    } = await supabase
-      .from('players')
-      .insert({
-        room_id:
-          targetRoom.id,
-        name:
-          cleanName,
-        avatar,
-      })
-      .select('*')
-      .single()
-
-    if (
-      playerError ||
-      !playerData
-    ) {
-      setError(
-        playerError
-          ?.message ??
-          '加入房间失败'
-      )
-      return
-    }
-
-    const newPlayer =
-      playerData as PlayerType
-
-    localStorage.setItem(
-      storageKey,
-      JSON.stringify(
-        newPlayer
-      )
-    )
-
-    setMe(newPlayer)
-    setRoom(targetRoom)
-
-    await refresh(
-      targetRoom.id,
-      newPlayer
-    )
-  }
-
-  /*
-   * 提交答案
-   */
-  const submit = async (
-    choice: 'A' | 'B'
-  ) => {
-    if (
-      !room ||
-      !question ||
-      !me ||
-      myAnswer ||
-      room.phase !==
-        'answering'
-    ) {
-      return
-    }
-
-    const allowedIds =
-      (
-        room as RoomGameState
-      ).round_player_ids ??
-      []
-
-    if (
-      !allowedIds.includes(
-        me.id
-      )
-    ) {
-      setError(
-        '你从下一题开始参与'
-      )
-      return
-    }
-
-    setError('')
-
-    const {
-      error:
-        answerError,
-    } = await supabase
-      .from('answers')
-      .insert({
-        room_id:
-          room.id,
-        question_id:
-          question.id,
-        player_id:
-          me.id,
-        choice,
-        comment:
-          comment.trim() ||
-          null,
-      })
-
-    if (answerError) {
-      if (
-        answerError.code ===
-        '23505'
-      ) {
-        await refresh(
-          room.id,
-          me
-        )
-
+      if (!cleanName) {
         return
       }
 
-      setError(
-        answerError.message
+      if (
+        Array.from(
+          cleanName
+        ).length >
+        4
+      ) {
+        setError(
+          '名字最多 4 个字'
+        )
+        return
+      }
+
+      setError('')
+
+      const {
+        data: roomData,
+        error:
+          roomError,
+      } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq(
+          'code',
+          code
+        )
+        .maybeSingle()
+
+      if (
+        roomError ||
+        !roomData
+      ) {
+        setError(
+          '房间不存在'
+        )
+        return
+      }
+
+      const targetRoom =
+        roomData as Room
+
+      if (
+        targetRoom.phase ===
+        'ended'
+      ) {
+        setError(
+          '这个房间已经结束'
+        )
+        return
+      }
+
+      const {
+        data:
+          existingPlayers,
+      } = await supabase
+        .from('players')
+        .select(
+          'avatar'
+        )
+        .eq(
+          'room_id',
+          targetRoom.id
+        )
+
+      if (
+        (
+          existingPlayers
+            ?.length ??
+          0
+        ) >= 20
+      ) {
+        setError(
+          '房间已经满员'
+        )
+        return
+      }
+
+      const usedAvatars =
+        new Set(
+          (
+            existingPlayers ??
+            []
+          ).map(
+            player =>
+              player.avatar
+          )
+        )
+
+      const freeAvatars =
+        Array.from(
+          {
+            length: 20,
+          },
+          (
+            _,
+            index
+          ) =>
+            index
+        ).filter(
+          index =>
+            !usedAvatars.has(
+              index
+            )
+        )
+
+      if (
+        !freeAvatars.length
+      ) {
+        setError(
+          '暂时没有可用头像'
+        )
+        return
+      }
+
+      const avatar =
+        freeAvatars[
+          Math.floor(
+            Math.random() *
+              freeAvatars.length
+          )
+        ]
+
+      const {
+        data:
+          playerData,
+        error:
+          playerError,
+      } = await supabase
+        .from('players')
+        .insert({
+          room_id:
+            targetRoom.id,
+          name:
+            cleanName,
+          avatar,
+        })
+        .select('*')
+        .single()
+
+      if (
+        playerError ||
+        !playerData
+      ) {
+        setError(
+          playerError
+            ?.message ??
+            '加入房间失败'
+        )
+        return
+      }
+
+      const newPlayer =
+        playerData as PlayerType
+
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify(
+          newPlayer
+        )
       )
 
-      return
+      setMe(
+        newPlayer
+      )
+
+      setRoom(
+        targetRoom
+      )
+
+      await refresh(
+        targetRoom.id,
+        newPlayer
+      )
     }
 
-    setComment('')
+  const submit =
+    async (
+      choice:
+        | 'A'
+        | 'B'
+    ) => {
+      if (
+        !room ||
+        !question ||
+        !me ||
+        myAnswer ||
+        room.phase !==
+          'answering'
+      ) {
+        return
+      }
 
-    await refresh(
-      room.id,
-      me
-    )
-  }
+      const allowedIds =
+        (
+          room as
+            RoomGameState
+        )
+          .round_player_ids ??
+        []
+
+      if (
+        !allowedIds.includes(
+          me.id
+        )
+      ) {
+        setError(
+          '你从下一题开始参与'
+        )
+        return
+      }
+
+      setError('')
+
+      const {
+        error:
+          answerError,
+      } = await supabase
+        .from('answers')
+        .insert({
+          room_id:
+            room.id,
+          question_id:
+            question.id,
+          player_id:
+            me.id,
+          choice,
+          comment:
+            comment.trim() ||
+            null,
+        })
+
+      if (
+        answerError
+      ) {
+        if (
+          answerError.code ===
+          '23505'
+        ) {
+          await refresh(
+            room.id,
+            me
+          )
+
+          return
+        }
+
+        setError(
+          answerError.message
+        )
+        return
+      }
+
+      setComment('')
+
+      await refresh(
+        room.id,
+        me
+      )
+    }
 
   if (loading) {
     return (
@@ -550,9 +729,6 @@ export default function Player() {
     )
   }
 
-  /*
-   * 加入页
-   */
   if (
     !joined ||
     !me
@@ -581,17 +757,32 @@ export default function Player() {
             你的名字
 
             <input
-              placeholder="输入昵称"
+              placeholder="最多4个字"
               value={name}
               onChange={
-                event =>
+                event => {
+                  const next =
+                    Array.from(
+                      event
+                        .target
+                        .value
+                    )
+                      .slice(
+                        0,
+                        4
+                      )
+                      .join(
+                        ''
+                      )
+
                   setName(
-                    event
-                      .target
-                      .value
+                    next
                   )
+                }
               }
-              maxLength={12}
+              maxLength={
+                8
+              }
             />
           </label>
 
@@ -622,9 +813,6 @@ export default function Player() {
     return null
   }
 
-  /*
-   * 已结束
-   */
   if (
     room.phase ===
     'ended'
@@ -649,9 +837,6 @@ export default function Player() {
     )
   }
 
-  /*
-   * 大厅
-   */
   if (
     room.phase ===
     'lobby'
@@ -673,7 +858,9 @@ export default function Player() {
           </p>
 
           <AnimalAvatar
-            index={me.avatar}
+            index={
+              me.avatar
+            }
             size={118}
           />
 
@@ -695,9 +882,6 @@ export default function Player() {
     )
   }
 
-  /*
-   * 已开启但还没发题
-   */
   if (
     room.phase ===
       'ready' ||
@@ -724,8 +908,7 @@ export default function Player() {
   }
 
   /*
-   * 中途加入：
-   * 当前题不参与。
+   * 当前题开始后才加入。
    */
   if (
     room.phase ===
@@ -742,13 +925,11 @@ export default function Player() {
         />
 
         <div className="player-welcome">
-          <h2>
-            欢迎加入！
-          </h2>
-
           <AnimalAvatar
-            index={me.avatar}
-            size={100}
+            index={
+              me.avatar
+            }
+            size={96}
           />
 
           <strong>
@@ -769,9 +950,6 @@ export default function Player() {
     )
   }
 
-  /*
-   * 答题
-   */
   if (
     room.phase ===
       'answering' &&
@@ -792,13 +970,17 @@ export default function Player() {
           </div>
 
           <h2>
-            {question.prompt}
+            {
+              question.prompt
+            }
           </h2>
 
           <button
             className="option a"
             onClick={() => {
-              void submit('A')
+              void submit(
+                'A'
+              )
             }}
           >
             {
@@ -815,7 +997,9 @@ export default function Player() {
           <button
             className="option b"
             onClick={() => {
-              void submit('B')
+              void submit(
+                'B'
+              )
             }}
           >
             {
@@ -832,7 +1016,9 @@ export default function Player() {
             </span>
 
             <textarea
-              value={comment}
+              value={
+                comment
+              }
               onChange={
                 event =>
                   setComment(
@@ -842,11 +1028,15 @@ export default function Player() {
                   )
               }
               placeholder="补一句条件、吐槽或者嘴硬…"
-              maxLength={80}
+              maxLength={
+                80
+              }
             />
 
             <small>
-              {comment.length}
+              {
+                comment.length
+              }
               /80
             </small>
           </label>
@@ -861,9 +1051,6 @@ export default function Player() {
     )
   }
 
-  /*
-   * 已答，等待本轮玩家
-   */
   if (
     room.phase ===
       'answering' &&
@@ -882,8 +1069,8 @@ export default function Player() {
           {
             currentRoundAnswers
               .length
-          }{' '}
-          /{' '}
+          }
+          {' / '}
           {
             currentRoundPlayers
               .length
@@ -898,7 +1085,9 @@ export default function Player() {
 
         <div className="wait-pill">
           你已选择{' '}
-          {myAnswer.choice}
+          {
+            myAnswer.choice
+          }
 
           <br />
 
@@ -922,18 +1111,21 @@ export default function Player() {
           answer.choice ===
           'A'
       )
-      .map(answer =>
-        players.find(
-          player =>
-            player.id ===
-            answer.player_id
-        )
+      .map(
+        answer =>
+          players.find(
+            player =>
+              player.id ===
+              answer.player_id
+          )
       )
       .filter(
         (
           player
         ): player is PlayerType =>
-          Boolean(player)
+          Boolean(
+            player
+          )
       )
 
   const bPlayers =
@@ -943,23 +1135,27 @@ export default function Player() {
           answer.choice ===
           'B'
       )
-      .map(answer =>
-        players.find(
-          player =>
-            player.id ===
-            answer.player_id
-        )
+      .map(
+        answer =>
+          players.find(
+            player =>
+              player.id ===
+              answer.player_id
+          )
       )
       .filter(
         (
           player
         ): player is PlayerType =>
-          Boolean(player)
+          Boolean(
+            player
+          )
       )
 
   const total =
     currentRoundAnswers
-      .length || 1
+      .length ||
+    1
 
   const comments =
     currentRoundAnswers.filter(
@@ -981,15 +1177,101 @@ export default function Player() {
         揭晓！
       </h1>
 
+      {/* 揭晓时仍然显示题目 */}
+      <section
+        style={{
+          background:
+            'rgba(255,255,255,.96)',
+          borderRadius:
+            18,
+          padding:
+            '14px 14px 12px',
+          marginBottom:
+            12,
+          textAlign:
+            'center',
+        }}
+      >
+        <div
+          style={{
+            fontSize: 14,
+            fontWeight:
+              700,
+            marginBottom:
+              10,
+          }}
+        >
+          {
+            question.prompt
+          }
+        </div>
+
+        <div
+          style={{
+            display:
+              'grid',
+            gridTemplateColumns:
+              '1fr 1fr',
+            gap: 8,
+          }}
+        >
+          <div
+            style={{
+              background:
+                '#fff0f4',
+              color:
+                '#d94b78',
+              borderRadius:
+                10,
+              padding:
+                '8px 6px',
+              fontSize:
+                12,
+              fontWeight:
+                700,
+            }}
+          >
+            A　{
+              question
+                .options[0]
+                ?.label
+            }
+          </div>
+
+          <div
+            style={{
+              background:
+                '#eef3ff',
+              color:
+                '#4d6acb',
+              borderRadius:
+                10,
+              padding:
+                '8px 6px',
+              fontSize:
+                12,
+              fontWeight:
+                700,
+            }}
+          >
+            B　{
+              question
+                .options[1]
+                ?.label
+            }
+          </div>
+        </div>
+      </section>
+
       <div className="reveal-board">
         <Side
           side="A"
           pct={`${Math.round(
             (
-              aPlayers
-                .length /
+              aPlayers.length /
               total
-            ) * 100
+            ) *
+              100
           )}%`}
           players={
             aPlayers
@@ -1000,10 +1282,10 @@ export default function Player() {
           side="B"
           pct={`${Math.round(
             (
-              bPlayers
-                .length /
+              bPlayers.length /
               total
-            ) * 100
+            ) *
+              100
           )}%`}
           players={
             bPlayers
@@ -1021,8 +1303,7 @@ export default function Player() {
               players.find(
                 item =>
                   item.id ===
-                  answer
-                    .player_id
+                  answer.player_id
               )
 
             return (
@@ -1041,11 +1322,14 @@ export default function Player() {
                       42,
                 }}
                 initial={{
-                  x: '100vw',
-                  opacity: 0,
+                  x:
+                    '100vw',
+                  opacity:
+                    0,
                 }}
                 animate={{
-                  x: '-110vw',
+                  x:
+                    '-110vw',
                   opacity: [
                     0,
                     1,
@@ -1054,7 +1338,8 @@ export default function Player() {
                   ],
                 }}
                 transition={{
-                  duration: 6,
+                  duration:
+                    6,
                   delay:
                     index *
                     0.45,
@@ -1096,8 +1381,7 @@ export default function Player() {
               players.find(
                 item =>
                   item.id ===
-                  answer
-                    .player_id
+                  answer.player_id
               )
 
             return (
@@ -1293,6 +1577,13 @@ function Floaters({
   )
 }
 
+/*
+ * 紧凑揭晓区。
+ *
+ * 不再给每个人单独做气泡。
+ * 每边 4 列，20 人 = 5 行。
+ * 保留头像 + 最多4字名字。
+ */
 function Side({
   side,
   pct,
@@ -1302,67 +1593,139 @@ function Side({
   pct: string
   players: PlayerType[]
 }) {
+  const isA =
+    side === 'A'
+
   return (
     <div
       className={
         `reveal-side ${side.toLowerCase()}`
       }
+      style={{
+        padding:
+          '10px 6px 12px',
+        minWidth: 0,
+      }}
     >
-      <h2>
+      <h2
+        style={{
+          marginBottom:
+            10,
+        }}
+      >
         {side}
 
         <strong>
           {pct}
+          {' · '}
+          {players.length}
+          人
         </strong>
       </h2>
 
-      {players.map(
-        (
-          player,
-          index
-        ) => (
-          <motion.div
-            className="side-player"
-            key={
-              player.id
-            }
-            initial={{
-              x:
-                side ===
-                'A'
-                  ? 120
-                  : -120,
-              y: -80,
-              opacity: 0,
-            }}
-            animate={{
-              x: 0,
-              y: 0,
-              opacity: 1,
-            }}
-            transition={{
-              delay:
-                index *
-                0.12,
-              type:
-                'spring',
-            }}
-          >
-            <AnimalAvatar
-              index={
-                player.avatar
+      <div
+        style={{
+          display:
+            'grid',
+          gridTemplateColumns:
+            'repeat(4, minmax(0, 1fr))',
+          columnGap:
+            3,
+          rowGap:
+            9,
+          alignItems:
+            'start',
+        }}
+      >
+        {players.map(
+          (
+            player,
+            index
+          ) => (
+            <motion.div
+              key={
+                player.id
               }
-              size={36}
-            />
+              initial={{
+                x:
+                  isA
+                    ? 35
+                    : -35,
+                y: -15,
+                opacity:
+                  0,
+              }}
+              animate={{
+                x: 0,
+                y: 0,
+                opacity:
+                  1,
+              }}
+              transition={{
+                delay:
+                  index *
+                  0.05,
+                type:
+                  'spring',
+              }}
+              style={{
+                display:
+                  'flex',
+                flexDirection:
+                  'column',
+                alignItems:
+                  'center',
+                minWidth:
+                  0,
+                background:
+                  'transparent',
+                border:
+                  'none',
+                boxShadow:
+                  'none',
+                padding:
+                  0,
+              }}
+            >
+              <AnimalAvatar
+                index={
+                  player.avatar
+                }
+                size={29}
+              />
 
-            <span>
-              {
-                player.name
-              }
-            </span>
-          </motion.div>
-        )
-      )}
+              <span
+                style={{
+                  display:
+                    'block',
+                  width:
+                    '100%',
+                  marginTop:
+                    3,
+                  textAlign:
+                    'center',
+                  fontSize:
+                    10,
+                  lineHeight:
+                    1.15,
+                  fontWeight:
+                    700,
+                  whiteSpace:
+                    'nowrap',
+                  overflow:
+                    'hidden',
+                  textOverflow:
+                    'ellipsis',
+                }}
+              >
+                {
+                  player.name
+                }
+              </span>
+            </motion.div>
+          )
+        )}
+      </div>
     </div>
   )
 }
