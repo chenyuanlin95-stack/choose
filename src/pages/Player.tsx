@@ -1,13 +1,979 @@
-import {useEffect,useMemo,useState} from 'react';import {useParams} from 'react-router-dom';import {motion,AnimatePresence} from 'framer-motion';import {AnimalAvatar} from '../lib/avatars';import {configured,supabase} from '../lib/supabase';import type {Answer,Player as P,Question,Room} from '../types';
-export default function Player(){const {code=''}=useParams();const [name,setName]=useState('');const [me,setMe]=useState<P|null>(null);const [room,setRoom]=useState<Room|null>(null);const [players,setPlayers]=useState<P[]>([]);const [q,setQ]=useState<Question|null>(null);const [answers,setAnswers]=useState<Answer[]>([]);const [comment,setComment]=useState('');const [error,setError]=useState('');const key='erxuanyi_player_'+code;const mine=answers.find(a=>a.player_id===me?.id);const joined=Boolean(me&&room);
-const refresh=async(roomId:string,player?:P)=>{const {data:r}=await supabase.from('rooms').select('*').eq('id',roomId).maybeSingle();if(!r)return;const rr=r as Room;setRoom(rr);const {data:ps}=await supabase.from('players').select('*').eq('room_id',roomId).order('joined_at');setPlayers((ps??[]) as P[]);if(rr.current_question_id){const {data:qq}=await supabase.from('questions').select('*').eq('id',rr.current_question_id).maybeSingle();setQ(qq as Question|null);const {data:aa}=await supabase.from('answers').select('*').eq('room_id',roomId).eq('question_id',rr.current_question_id).order('created_at');setAnswers((aa??[]) as Answer[])}else{setQ(null);setAnswers([])}if(player)setMe(player)};
-useEffect(()=>{const saved=localStorage.getItem(key);if(saved){try{const p=JSON.parse(saved) as P;void refresh(p.room_id,p)}catch{localStorage.removeItem(key)}}},[code]);useEffect(()=>{if(!room)return;const ch=supabase.channel('player-live-'+room.id).on('postgres_changes',{event:'*',schema:'public',table:'rooms',filter:`id=eq.${room.id}`},()=>{void refresh(room.id)}).on('postgres_changes',{event:'*',schema:'public',table:'players',filter:`room_id=eq.${room.id}`},()=>{void refresh(room.id)}).on('postgres_changes',{event:'*',schema:'public',table:'answers',filter:`room_id=eq.${room.id}`},()=>{void refresh(room.id)}).subscribe();return()=>{void supabase.removeChannel(ch)}},[room?.id,room?.current_question_id]);
-const join=async()=>{const clean=name.trim();if(!clean)return;setError('');const {data:r}=await supabase.from('rooms').select('*').eq('code',code).eq('phase','lobby').maybeSingle();if(!r){setError('房间不存在或房主已经开启游戏');return}const {data:existing}=await supabase.from('players').select('avatar').eq('room_id',r.id);if((existing?.length??0)>=20){setError('房间已满');return}const used=new Set((existing??[]).map(x=>x.avatar));const free=Array.from({length:20},(_,i)=>i).filter(i=>!used.has(i));const avatar=free[Math.floor(Math.random()*free.length)];const {data:p,error:e}=await supabase.from('players').insert({room_id:r.id,name:clean,avatar}).select('*').single();if(e||!p){setError(e?.message??'加入失败');return}localStorage.setItem(key,JSON.stringify(p));setMe(p as P);setRoom(r as Room);await refresh(r.id,p as P)};const submit=async(choice:string)=>{if(!room||!q||!me||mine)return;const {error:e}=await supabase.from('answers').insert({room_id:room.id,question_id:q.id,player_id:me.id,choice,comment:comment.trim()||null});if(e)setError(e.message);else setComment('')};const aPlayers=useMemo(()=>answers.filter(x=>x.choice==='A').map(x=>players.find(p=>p.id===x.player_id)).filter(Boolean) as P[],[answers,players]);const bPlayers=useMemo(()=>answers.filter(x=>x.choice==='B').map(x=>players.find(p=>p.id===x.player_id)).filter(Boolean) as P[],[answers,players]);
-if(!joined)return <Shell><div className="brand small">二选一</div><section className="white-card"><h2>加入房间</h2><label>房间号<input value={code} readOnly/></label><label>你的名字<input placeholder="输入昵称" value={name} onChange={e=>setName(e.target.value)} maxLength={12}/></label><button className="primary" disabled={!name.trim()||!configured} onClick={()=>{void join()}}>加入房间</button>{error&&<p>{error}</p>}</section></Shell>;
-if(room.phase==='ended')return <Shell><Header code={code} round="已结束"/><div className="white-card"><h2>本场游戏已结束</h2></div></Shell>;
-if(room.phase==='lobby')return <Shell><Header code={code} round="等待开局"/><div className="avatar-grid">{players.map(p=><div key={p.id}><AnimalAvatar index={p.avatar}/><span>{p.name}</span></div>)}</div><div className="wait-pill">等待房主开启游戏…</div></Shell>;
-if(room.phase==='ready'||!q)return <Shell><Header code={code} round="游戏已开启"/><div className="avatar-grid">{players.map(p=><div key={p.id}><AnimalAvatar index={p.avatar}/><span>{p.name}</span></div>)}</div><div className="wait-pill">房主正在选择第一题…</div></Shell>;
-if(room.phase==='answering'&&!mine)return <Shell><Header code={code} round={`第 ${room.round} 题`}/><section className="question-card"><div className="must">必须选一个</div><h2>{q.prompt}</h2><button className="option a" onClick={()=>{void submit('A')}}>{q.options[0]?.label}</button><b className="vs">VS</b><button className="option b" onClick={()=>{void submit('B')}}>{q.options[1]?.label}</button><label className="comment-label">💬 我有话说 <span>（可选）</span><textarea value={comment} onChange={e=>setComment(e.target.value)} placeholder="补一句条件、吐槽或者嘴硬…" maxLength={80}/><small>{comment.length}/80</small></label>{error&&<p>{error}</p>}</section></Shell>;
-if(room.phase==='answering'&&mine)return <Shell><Header code={code} round={`第 ${room.round} 题`}/><h1 className="count">{answers.length} / {players.length}</h1><Floaters players={players}/><div className="wait-pill">你已选择 {mine.choice}<br/><small>等待其他玩家…全部完成后自动揭晓</small></div></Shell>;
-const total=answers.length||1;return <Shell><Header code={code} round={`第 ${room.round} 题`}/><h1 className="reveal-title">揭晓！</h1><div className="reveal-board"><Side side="A" pct={`${Math.round(aPlayers.length/total*100)}%`} players={aPlayers}/><Side side="B" pct={`${Math.round(bPlayers.length/total*100)}%`} players={bPlayers}/></div><AnimatePresence>{answers.filter(x=>x.comment).map((x,i)=>{const p=players.find(p=>p.id===x.player_id);return <motion.div key={x.id} className="flying-comment" style={{top:80+i*42}} initial={{x:'100vw',opacity:0}} animate={{x:'-10vw',opacity:[0,1,1,0]}} transition={{duration:5,delay:i*.5}}><AnimalAvatar index={p?.avatar??0} size={34}/>{x.comment}</motion.div>})}</AnimatePresence><section className="discussion"><h3>大家有话说</h3>{answers.filter(x=>x.comment).map(x=>{const p=players.find(p=>p.id===x.player_id);return <p key={x.id}><AnimalAvatar index={p?.avatar??0} size={30}/><b>{p?.name}：</b>{x.comment}</p>})}</section><div className="wait-pill">等待房主进入下一题…</div></Shell>}
-function Shell({children}:{children:React.ReactNode}){return <main className="star-bg phone-page"><div className="phone-shell">{children}</div></main>}function Header({code,round}:{code:string,round:string}){return <header className="player-head"><span className="mini-brand">二选一</span><span>{round}</span><span>#{code}</span></header>}function Floaters({players}:{players:P[]}){return <div className="float-zone">{players.map((p,i)=><motion.div key={p.id} className="floater" style={{left:`${12+(i*23)%72}%`,top:`${12+(i*31)%70}%`}} animate={{x:[0,(i%2?12:-10),0],y:[0,(i%3?8:-12),0]}} transition={{duration:3+i*.25,repeat:Infinity,ease:'easeInOut'}}><AnimalAvatar index={p.avatar} size={48}/><span>{p.name}</span></motion.div>)}</div>}function Side({side,pct,players}:{side:string,pct:string,players:P[]}){return <div className={'reveal-side '+side.toLowerCase()}><h2>{side} <strong>{pct}</strong></h2>{players.map((p,i)=><motion.div className="side-player" key={p.id} initial={{x:side==='A'?120:-120,y:-80,opacity:0}} animate={{x:0,y:0,opacity:1}} transition={{delay:i*.12,type:'spring'}}><AnimalAvatar index={p.avatar} size={36}/><span>{p.name}</span></motion.div>)}</div>}
+import { useEffect, useMemo, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { AnimatePresence, motion } from 'framer-motion'
+
+import { AnimalAvatar } from '../lib/avatars'
+import { configured, supabase } from '../lib/supabase'
+
+import type {
+  Answer,
+  Player as PlayerType,
+  Question,
+  Room,
+} from '../types'
+
+
+export default function Player() {
+  const { code = '' } = useParams()
+
+  const [name, setName] = useState('')
+  const [me, setMe] = useState<PlayerType | null>(null)
+  const [room, setRoom] = useState<Room | null>(null)
+  const [players, setPlayers] = useState<PlayerType[]>([])
+  const [question, setQuestion] = useState<Question | null>(null)
+  const [answers, setAnswers] = useState<Answer[]>([])
+  const [comment, setComment] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  const storageKey = `erxuanyi_player_${code}`
+
+  const myAnswer = useMemo(() => {
+    if (!me) return undefined
+
+    return answers.find(
+      answer => answer.player_id === me.id
+    )
+  }, [answers, me])
+
+  const joined = Boolean(me && room)
+
+  const refresh = async (
+    roomId: string,
+    player?: PlayerType
+  ) => {
+    const { data: roomData, error: roomError } =
+      await supabase
+        .from('rooms')
+        .select('*')
+        .eq('id', roomId)
+        .maybeSingle()
+
+    if (roomError || !roomData) {
+      localStorage.removeItem(storageKey)
+      setRoom(null)
+      setMe(null)
+      setPlayers([])
+      setAnswers([])
+      setQuestion(null)
+      setLoading(false)
+      return
+    }
+
+    const nextRoom = roomData as Room
+
+    setRoom(nextRoom)
+
+    const { data: playerData } =
+      await supabase
+        .from('players')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('joined_at')
+
+    const nextPlayers =
+      (playerData ?? []) as PlayerType[]
+
+    setPlayers(nextPlayers)
+
+    if (player) {
+      const stillExists = nextPlayers.some(
+        item => item.id === player.id
+      )
+
+      if (stillExists) {
+        setMe(player)
+      } else {
+        localStorage.removeItem(storageKey)
+        setMe(null)
+      }
+    }
+
+    if (nextRoom.current_question_id) {
+      const { data: questionData } =
+        await supabase
+          .from('questions')
+          .select('*')
+          .eq('id', nextRoom.current_question_id)
+          .maybeSingle()
+
+      setQuestion(
+        questionData
+          ? (questionData as Question)
+          : null
+      )
+
+      const { data: answerData } =
+        await supabase
+          .from('answers')
+          .select('*')
+          .eq('room_id', roomId)
+          .eq(
+            'question_id',
+            nextRoom.current_question_id
+          )
+          .order('created_at')
+
+      setAnswers(
+        (answerData ?? []) as Answer[]
+      )
+    } else {
+      setQuestion(null)
+      setAnswers([])
+    }
+
+    setLoading(false)
+  }
+
+
+  /*
+   * 恢复当前玩家
+   */
+  useEffect(() => {
+    const saved = localStorage.getItem(storageKey)
+
+    if (!saved) {
+      setLoading(false)
+      return
+    }
+
+    try {
+      const player =
+        JSON.parse(saved) as PlayerType
+
+      void refresh(player.room_id, player)
+    } catch {
+      localStorage.removeItem(storageKey)
+      setLoading(false)
+    }
+  }, [code])
+
+
+  /*
+   * Supabase realtime
+   */
+  useEffect(() => {
+    if (!room) return
+
+    const roomId = room.id
+
+    const channel = supabase
+      .channel(`player-live-${roomId}`)
+
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'rooms',
+          filter: `id=eq.${roomId}`,
+        },
+        () => {
+          void refresh(roomId, me ?? undefined)
+        }
+      )
+
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'players',
+          filter: `room_id=eq.${roomId}`,
+        },
+        () => {
+          void refresh(roomId, me ?? undefined)
+        }
+      )
+
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'answers',
+          filter: `room_id=eq.${roomId}`,
+        },
+        () => {
+          void refresh(roomId, me ?? undefined)
+        }
+      )
+
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [room?.id, room?.current_question_id, me?.id])
+
+
+  /*
+   * 加入房间
+   */
+  const join = async () => {
+    const cleanName = name.trim()
+
+    if (!cleanName) return
+
+    setError('')
+
+    const { data: roomData, error: roomError } =
+      await supabase
+        .from('rooms')
+        .select('*')
+        .eq('code', code)
+        .eq('phase', 'lobby')
+        .maybeSingle()
+
+    if (roomError || !roomData) {
+      setError('房间不存在，或者房主已经开启游戏')
+      return
+    }
+
+    const targetRoom = roomData as Room
+
+    const { data: existingPlayers } =
+      await supabase
+        .from('players')
+        .select('avatar')
+        .eq('room_id', targetRoom.id)
+
+    if ((existingPlayers?.length ?? 0) >= 20) {
+      setError('房间已经满员')
+      return
+    }
+
+    const usedAvatars = new Set(
+      (existingPlayers ?? []).map(
+        player => player.avatar
+      )
+    )
+
+    const freeAvatars = Array
+      .from({ length: 20 }, (_, index) => index)
+      .filter(index => !usedAvatars.has(index))
+
+    if (!freeAvatars.length) {
+      setError('暂时没有可用头像')
+      return
+    }
+
+    const avatar =
+      freeAvatars[
+        Math.floor(
+          Math.random() * freeAvatars.length
+        )
+      ]
+
+    const { data: playerData, error: playerError } =
+      await supabase
+        .from('players')
+        .insert({
+          room_id: targetRoom.id,
+          name: cleanName,
+          avatar,
+        })
+        .select('*')
+        .single()
+
+    if (playerError || !playerData) {
+      setError(
+        playerError?.message ?? '加入房间失败'
+      )
+      return
+    }
+
+    const newPlayer =
+      playerData as PlayerType
+
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify(newPlayer)
+    )
+
+    setMe(newPlayer)
+    setRoom(targetRoom)
+
+    await refresh(
+      targetRoom.id,
+      newPlayer
+    )
+  }
+
+
+  /*
+   * 提交二选一
+   */
+  const submit = async (choice: 'A' | 'B') => {
+    if (
+      !room ||
+      !question ||
+      !me ||
+      myAnswer ||
+      room.phase !== 'answering'
+    ) {
+      return
+    }
+
+    setError('')
+
+    const { error: answerError } =
+      await supabase
+        .from('answers')
+        .insert({
+          room_id: room.id,
+          question_id: question.id,
+          player_id: me.id,
+          choice,
+          comment:
+            comment.trim() || null,
+        })
+
+    if (answerError) {
+      /*
+       * 唯一索引会阻止同一玩家重复回答。
+       */
+      if (answerError.code === '23505') {
+        await refresh(room.id, me)
+        return
+      }
+
+      setError(answerError.message)
+      return
+    }
+
+    setComment('')
+
+    await refresh(room.id, me)
+  }
+
+
+  /*
+   * 初始恢复中
+   */
+  if (loading) {
+    return (
+      <Shell>
+        <div className="wait-pill">
+          正在进入房间…
+        </div>
+      </Shell>
+    )
+  }
+
+
+  /*
+   * 1. 加入房间
+   */
+  if (!joined || !me) {
+    return (
+      <Shell>
+        <div className="brand small">
+          二选一
+        </div>
+
+        <section className="white-card">
+          <h2>加入房间</h2>
+
+          <label>
+            房间号
+
+            <input
+              value={code}
+              readOnly
+            />
+          </label>
+
+          <label>
+            你的名字
+
+            <input
+              placeholder="输入昵称"
+              value={name}
+              onChange={event =>
+                setName(event.target.value)
+              }
+              maxLength={12}
+            />
+          </label>
+
+          <button
+            className="primary"
+            disabled={
+              !name.trim() ||
+              !configured
+            }
+            onClick={() => {
+              void join()
+            }}
+          >
+            加入房间
+          </button>
+
+          {error && (
+            <p className="error">
+              {error}
+            </p>
+          )}
+        </section>
+      </Shell>
+    )
+  }
+
+
+  /*
+   * 到这里之后，TypeScript 已经明确知道
+   * room 不可能是 null。
+   *
+   * 这就是修复 Vercel TS18047 的关键。
+   */
+  if (!room) {
+    return null
+  }
+
+
+  /*
+   * 房主结束房间
+   */
+  if (room.phase === 'ended') {
+    return (
+      <Shell>
+        <Header
+          code={code}
+          round="已结束"
+        />
+
+        <section className="white-card">
+          <h2>本场游戏已结束</h2>
+
+          <p>
+            感谢参与 ✨
+          </p>
+        </section>
+      </Shell>
+    )
+  }
+
+
+  /*
+   * 2 + 3. 已加入 / 等待房主
+   */
+  if (room.phase === 'lobby') {
+    return (
+      <Shell>
+        <Header
+          code={code}
+          round="等待开局"
+        />
+
+        <div className="player-welcome">
+          <h2>欢迎加入！</h2>
+
+          <p>这是你的专属头像</p>
+
+          <AnimalAvatar
+            index={me.avatar}
+            size={118}
+          />
+
+          <strong>{me.name}</strong>
+        </div>
+
+        <div className="avatar-grid">
+          {players.map(player => (
+            <div key={player.id}>
+              <AnimalAvatar
+                index={player.avatar}
+              />
+
+              <span>
+                {player.name}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="wait-pill">
+          等待房主开始…
+        </div>
+      </Shell>
+    )
+  }
+
+
+  /*
+   * 房主已经点“开启游戏”
+   * 但还没发布第一题
+   */
+  if (
+    room.phase === 'ready' ||
+    !question
+  ) {
+    return (
+      <Shell>
+        <Header
+          code={code}
+          round="游戏已开启"
+        />
+
+        <div className="avatar-grid">
+          {players.map(player => (
+            <div key={player.id}>
+              <AnimalAvatar
+                index={player.avatar}
+              />
+
+              <span>
+                {player.name}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="wait-pill">
+          房主正在选择第一题…
+        </div>
+      </Shell>
+    )
+  }
+
+
+  /*
+   * 4. 答题页面
+   */
+  if (
+    room.phase === 'answering' &&
+    !myAnswer
+  ) {
+    return (
+      <Shell>
+        <Header
+          code={code}
+          round={`第 ${room.round} 题`}
+        />
+
+        <section className="question-card">
+          <div className="must">
+            必须选一个
+          </div>
+
+          <h2>
+            {question.prompt}
+          </h2>
+
+          <button
+            className="option a"
+            onClick={() => {
+              void submit('A')
+            }}
+          >
+            {question.options[0]?.label}
+          </button>
+
+          <b className="vs">
+            VS
+          </b>
+
+          <button
+            className="option b"
+            onClick={() => {
+              void submit('B')
+            }}
+          >
+            {question.options[1]?.label}
+          </button>
+
+          <label className="comment-label">
+            💬 我有话说
+            <span>（可选）</span>
+
+            <textarea
+              value={comment}
+              onChange={event =>
+                setComment(
+                  event.target.value
+                )
+              }
+              placeholder="补一句条件、吐槽或者嘴硬…"
+              maxLength={80}
+            />
+
+            <small>
+              {comment.length}/80
+            </small>
+          </label>
+
+          {error && (
+            <p className="error">
+              {error}
+            </p>
+          )}
+        </section>
+      </Shell>
+    )
+  }
+
+
+  /*
+   * 5. 自己已答，等待其他人
+   */
+  if (
+    room.phase === 'answering' &&
+    myAnswer
+  ) {
+    return (
+      <Shell>
+        <Header
+          code={code}
+          round={`第 ${room.round} 题`}
+        />
+
+        <h1 className="count">
+          {answers.length} / {players.length}
+        </h1>
+
+        <Floaters players={players} />
+
+        <div className="wait-pill">
+          你已选择 {myAnswer.choice}
+
+          <br />
+
+          <small>
+            等待其他玩家…
+            <br />
+            所有人选择后自动揭晓
+          </small>
+        </div>
+      </Shell>
+    )
+  }
+
+
+  /*
+   * 6. 揭晓
+   */
+  const aPlayers = answers
+    .filter(answer => answer.choice === 'A')
+    .map(answer =>
+      players.find(
+        player =>
+          player.id === answer.player_id
+      )
+    )
+    .filter(
+      (player): player is PlayerType =>
+        Boolean(player)
+    )
+
+  const bPlayers = answers
+    .filter(answer => answer.choice === 'B')
+    .map(answer =>
+      players.find(
+        player =>
+          player.id === answer.player_id
+      )
+    )
+    .filter(
+      (player): player is PlayerType =>
+        Boolean(player)
+    )
+
+  const total = answers.length || 1
+
+  const comments = answers.filter(
+    answer =>
+      answer.comment &&
+      answer.comment.trim()
+  )
+
+  return (
+    <Shell>
+      <Header
+        code={code}
+        round={`第 ${room.round} 题`}
+      />
+
+      <h1 className="reveal-title">
+        揭晓！
+      </h1>
+
+      <div className="reveal-board">
+        <Side
+          side="A"
+          pct={`${Math.round(
+            aPlayers.length /
+              total *
+              100
+          )}%`}
+          players={aPlayers}
+        />
+
+        <Side
+          side="B"
+          pct={`${Math.round(
+            bPlayers.length /
+              total *
+              100
+          )}%`}
+          players={bPlayers}
+        />
+      </div>
+
+      <AnimatePresence>
+        {comments.map(
+          (answer, index) => {
+            const player =
+              players.find(
+                item =>
+                  item.id ===
+                  answer.player_id
+              )
+
+            return (
+              <motion.div
+                key={answer.id}
+                className="flying-comment"
+                style={{
+                  top:
+                    80 +
+                    (index % 5) * 42,
+                }}
+                initial={{
+                  x: '100vw',
+                  opacity: 0,
+                }}
+                animate={{
+                  x: '-110vw',
+                  opacity: [
+                    0,
+                    1,
+                    1,
+                    0,
+                  ],
+                }}
+                transition={{
+                  duration: 6,
+                  delay:
+                    index * 0.45,
+                }}
+              >
+                <AnimalAvatar
+                  index={
+                    player?.avatar ?? 0
+                  }
+                  size={34}
+                />
+
+                {answer.comment}
+              </motion.div>
+            )
+          }
+        )}
+      </AnimatePresence>
+
+      <section className="discussion">
+        <h3>大家有话说</h3>
+
+        {comments.length === 0 && (
+          <p className="muted">
+            这一题大家都很安静 👀
+          </p>
+        )}
+
+        {comments.map(answer => {
+          const player =
+            players.find(
+              item =>
+                item.id ===
+                answer.player_id
+            )
+
+          return (
+            <p key={answer.id}>
+              <AnimalAvatar
+                index={
+                  player?.avatar ?? 0
+                }
+                size={30}
+              />
+
+              <b>
+                {player?.name ?? '玩家'}：
+              </b>
+
+              {answer.comment}
+            </p>
+          )
+        })}
+      </section>
+
+      <div className="wait-pill">
+        等待房主进入下一题…
+      </div>
+    </Shell>
+  )
+}
+
+
+function Shell({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <main className="star-bg phone-page">
+      <div className="phone-shell">
+        {children}
+      </div>
+    </main>
+  )
+}
+
+
+function Header({
+  code,
+  round,
+}: {
+  code: string
+  round: string
+}) {
+  return (
+    <header className="player-head">
+      <span className="mini-brand">
+        二选一
+      </span>
+
+      <span>
+        {round}
+      </span>
+
+      <span>
+        #{code}
+      </span>
+    </header>
+  )
+}
+
+
+function Floaters({
+  players,
+}: {
+  players: PlayerType[]
+}) {
+  return (
+    <div className="float-zone">
+      {players.map(
+        (player, index) => (
+          <motion.div
+            key={player.id}
+            className="floater"
+            style={{
+              left: `${
+                12 +
+                (index * 23) % 72
+              }%`,
+              top: `${
+                12 +
+                (index * 31) % 70
+              }%`,
+            }}
+            animate={{
+              x: [
+                0,
+                index % 2
+                  ? 12
+                  : -10,
+                0,
+              ],
+              y: [
+                0,
+                index % 3
+                  ? 8
+                  : -12,
+                0,
+              ],
+            }}
+            transition={{
+              duration:
+                3 +
+                index * 0.25,
+              repeat: Infinity,
+              ease: 'easeInOut',
+            }}
+          >
+            <AnimalAvatar
+              index={player.avatar}
+              size={48}
+            />
+
+            <span>
+              {player.name}
+            </span>
+          </motion.div>
+        )
+      )}
+    </div>
+  )
+}
+
+
+function Side({
+  side,
+  pct,
+  players,
+}: {
+  side: 'A' | 'B'
+  pct: string
+  players: PlayerType[]
+}) {
+  return (
+    <div
+      className={`reveal-side ${side.toLowerCase()}`}
+    >
+      <h2>
+        {side}
+
+        <strong>
+          {pct}
+        </strong>
+      </h2>
+
+      {players.map(
+        (player, index) => (
+          <motion.div
+            className="side-player"
+            key={player.id}
+            initial={{
+              x:
+                side === 'A'
+                  ? 120
+                  : -120,
+              y: -80,
+              opacity: 0,
+            }}
+            animate={{
+              x: 0,
+              y: 0,
+              opacity: 1,
+            }}
+            transition={{
+              delay:
+                index * 0.12,
+              type: 'spring',
+            }}
+          >
+            <AnimalAvatar
+              index={player.avatar}
+              size={36}
+            />
+
+            <span>
+              {player.name}
+            </span>
+          </motion.div>
+        )
+      )}
+    </div>
+  )
+}
