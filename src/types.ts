@@ -1,4 +1,4 @@
-export type QuestionType='binary'|'ranking';export type RoomPhase='lobby'|'answering'|'reveal'|'ended';
+export type QuestionType='binary'|'ranking';export type RoomPhase='lobby'|'ready'|'answering'|'reveal'|'ended';
 export interface Option{ id:string; label:string }
 export interface Question{ id:string; type:QuestionType; prompt:string; options:Option[]; category:string; enabled:boolean }
 export interface Player{ id:string; room_id:string; name:string; avatar:number; joined_at?:string }
