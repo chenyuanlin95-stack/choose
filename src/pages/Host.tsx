@@ -28,6 +28,11 @@ const ROOM_KEY = 'erxuanyi_host_room'
 
 type Tab = 'room' | 'bank' | 'game'
 
+type RoomGameState = Room & {
+  used_question_ids?: string[] | null
+  round_player_ids?: string[] | null
+}
+
 type QuestionDraft = {
   id?: string
   type: QuestionType
@@ -42,6 +47,16 @@ const emptyDraft = (): QuestionDraft => ({
   category: '未分类',
   options: ['', ''],
 })
+
+const getUsedQuestionIds = (
+  room: Room | null
+): string[] =>
+  (room as RoomGameState | null)?.used_question_ids ?? []
+
+const getRoundPlayerIds = (
+  room: Room | null
+): string[] =>
+  (room as RoomGameState | null)?.round_player_ids ?? []
 
 export default function Host() {
   const [tab, setTab] = useState<Tab>('room')
@@ -137,10 +152,7 @@ export default function Host() {
   useEffect(() => {
     if (!room) return
 
-    localStorage.setItem(
-      ROOM_KEY,
-      room.id
-    )
+    localStorage.setItem(ROOM_KEY, room.id)
 
     void loadPlayers(room.id)
     void loadAnswers(room)
@@ -149,7 +161,6 @@ export default function Host() {
 
     const channel = supabase
       .channel(`host-${id}`)
-
       .on(
         'postgres_changes',
         {
@@ -162,7 +173,6 @@ export default function Host() {
           void loadRoom(id)
         }
       )
-
       .on(
         'postgres_changes',
         {
@@ -175,7 +185,6 @@ export default function Host() {
           void loadPlayers(id)
         }
       )
-
       .on(
         'postgres_changes',
         {
@@ -185,48 +194,60 @@ export default function Host() {
           filter: `room_id=eq.${id}`,
         },
         () => {
-          const currentRoom =
-            roomRef.current
+          const currentRoom = roomRef.current
 
           if (currentRoom) {
             void loadAnswers(currentRoom)
           }
         }
       )
-
       .subscribe()
 
     return () => {
       void supabase.removeChannel(channel)
     }
-  }, [
-    room?.id,
-    room?.current_question_id,
-  ])
+  }, [room?.id, room?.current_question_id])
 
   /*
-   * 所有玩家答完后自动揭晓
+   * 当前轮冻结的玩家全部完成以后揭晓。
+   * 中途加入的人不会卡住当前轮。
    */
   useEffect(() => {
-    if (
-      room?.phase === 'answering' &&
-      players.length > 0 &&
-      answers.length >= players.length
-    ) {
-      void supabase
-        .from('rooms')
-        .update({
-          phase: 'reveal',
-        })
-        .eq('id', room.id)
-        .eq('phase', 'answering')
-        .then(() => {})
+    if (!room || room.phase !== 'answering') {
+      return
     }
+
+    const expectedIds = getRoundPlayerIds(room)
+
+    if (!expectedIds.length) {
+      return
+    }
+
+    const answeredIds = new Set(
+      answers.map(answer => answer.player_id)
+    )
+
+    const allAnswered = expectedIds.every(id =>
+      answeredIds.has(id)
+    )
+
+    if (!allAnswered) {
+      return
+    }
+
+    void supabase
+      .from('rooms')
+      .update({
+        phase: 'reveal',
+      })
+      .eq('id', room.id)
+      .eq('phase', 'answering')
+      .then(() => {})
   }, [
     room?.phase,
     room?.id,
-    players.length,
-    answers.length,
+    (room as RoomGameState | null)?.round_player_ids,
+    answers,
   ])
 
   const createRoom = async () => {
@@ -236,9 +257,7 @@ export default function Host() {
 
     for (let i = 0; i < 8; i += 1) {
       const code = String(
-        Math.floor(
-          1000 + Math.random() * 9000
-        )
+        Math.floor(1000 + Math.random() * 9000)
       )
 
       const {
@@ -250,6 +269,8 @@ export default function Host() {
           code,
           phase: 'lobby',
           round: 0,
+          used_question_ids: [],
+          round_player_ids: [],
         })
         .select('*')
         .single()
@@ -261,16 +282,13 @@ export default function Host() {
 
       if (createError?.code !== '23505') {
         setError(
-          createError?.message ??
-            '创建失败'
+          createError?.message ?? '创建失败'
         )
         return
       }
     }
 
-    setError(
-      '没有成功生成房间号，请再试一次'
-    )
+    setError('没有成功生成房间号，请再试一次')
   }
 
   const startRoom = async () => {
@@ -278,14 +296,13 @@ export default function Host() {
 
     setError('')
 
-    const { error: startError } =
-      await supabase
-        .from('rooms')
-        .update({
-          phase: 'ready',
-        })
-        .eq('id', room.id)
-        .eq('phase', 'lobby')
+    const { error: startError } = await supabase
+      .from('rooms')
+      .update({
+        phase: 'ready',
+      })
+      .eq('id', room.id)
+      .eq('phase', 'lobby')
 
     if (startError) {
       setError(startError.message)
@@ -307,37 +324,36 @@ export default function Host() {
 
     setError('')
 
-    const { error: answerError } =
-      await supabase
-        .from('answers')
-        .delete()
-        .eq('room_id', room.id)
+    const { error: answerError } = await supabase
+      .from('answers')
+      .delete()
+      .eq('room_id', room.id)
 
     if (answerError) {
       setError(answerError.message)
       return
     }
 
-    const { error: playerError } =
-      await supabase
-        .from('players')
-        .delete()
-        .eq('room_id', room.id)
+    const { error: playerError } = await supabase
+      .from('players')
+      .delete()
+      .eq('room_id', room.id)
 
     if (playerError) {
       setError(playerError.message)
       return
     }
 
-    const { error: roomError } =
-      await supabase
-        .from('rooms')
-        .update({
-          phase: 'lobby',
-          current_question_id: null,
-          round: 0,
-        })
-        .eq('id', room.id)
+    const { error: roomError } = await supabase
+      .from('rooms')
+      .update({
+        phase: 'lobby',
+        current_question_id: null,
+        round: 0,
+        used_question_ids: [],
+        round_player_ids: [],
+      })
+      .eq('id', room.id)
 
     if (roomError) {
       setError(roomError.message)
@@ -361,17 +377,12 @@ export default function Host() {
 
     const id = room.id
 
-    /*
-     * 先让玩家收到 ended，
-     * 再清主控本地状态。
-     */
-    const { error: endError } =
-      await supabase
-        .from('rooms')
-        .update({
-          phase: 'ended',
-        })
-        .eq('id', id)
+    const { error: endError } = await supabase
+      .from('rooms')
+      .update({
+        phase: 'ended',
+      })
+      .eq('id', id)
 
     if (endError) {
       setError(endError.message)
@@ -393,9 +404,6 @@ export default function Host() {
       return
     }
 
-    /*
-     * 当前游戏 UI 暂时只完整支持 binary。
-     */
     if (question.type !== 'binary') {
       setError(
         '排序题已经可以进入题库，但玩家端排序玩法还没有开放。'
@@ -403,18 +411,39 @@ export default function Host() {
       return
     }
 
+    const previousUsed = getUsedQuestionIds(room)
+
+    if (previousUsed.includes(question.id)) {
+      setError('这道题本房间已经出过了')
+      return
+    }
+
+    const currentPlayerIds = players.map(
+      player => player.id
+    )
+
+    if (!currentPlayerIds.length) {
+      setError('当前没有玩家，无法发布题目')
+      return
+    }
+
     setError('')
 
-    const { error: publishError } =
-      await supabase
-        .from('rooms')
-        .update({
-          phase: 'answering',
-          current_question_id:
-            question.id,
-          round: room.round + 1,
-        })
-        .eq('id', room.id)
+    const nextUsed = [
+      ...previousUsed,
+      question.id,
+    ]
+
+    const { error: publishError } = await supabase
+      .from('rooms')
+      .update({
+        phase: 'answering',
+        current_question_id: question.id,
+        round: room.round + 1,
+        used_question_ids: nextUsed,
+        round_player_ids: currentPlayerIds,
+      })
+      .eq('id', room.id)
 
     if (publishError) {
       setError(publishError.message)
@@ -429,37 +458,38 @@ export default function Host() {
   }
 
   const randomPublish = () => {
-    const used =
-      room?.current_question_id
+    if (!room) return
 
-    const candidates = qs.filter(
-      question =>
-        question.type === 'binary' &&
-        question.id !== used
+    const binaryQuestions = qs.filter(
+      question => question.type === 'binary'
     )
 
-    const fallback = qs.filter(
-      question =>
-        question.type === 'binary'
-    )
-
-    const pool =
-      candidates.length
-        ? candidates
-        : fallback
-
-    if (!pool.length) {
+    if (!binaryQuestions.length) {
       setError(
         '题库里还没有可发布的二选一题目'
       )
       return
     }
 
+    const used = new Set(
+      getUsedQuestionIds(room)
+    )
+
+    const candidates = binaryQuestions.filter(
+      question => !used.has(question.id)
+    )
+
+    if (!candidates.length) {
+      setError(
+        `本房间的 ${binaryQuestions.length} 道二选一题已经全部出完。清空房间后可以重新开始。`
+      )
+      return
+    }
+
     const question =
-      pool[
+      candidates[
         Math.floor(
-          Math.random() *
-            pool.length
+          Math.random() * candidates.length
         )
       ]
 
@@ -469,8 +499,7 @@ export default function Host() {
   const current =
     qs.find(
       question =>
-        question.id ===
-        room?.current_question_id
+        question.id === room?.current_question_id
     ) ?? null
 
   return (
@@ -482,9 +511,7 @@ export default function Host() {
 
         <Nav
           active={tab === 'room'}
-          onClick={() =>
-            setTab('room')
-          }
+          onClick={() => setTab('room')}
           icon={<Home />}
         >
           房间
@@ -492,9 +519,7 @@ export default function Host() {
 
         <Nav
           active={tab === 'bank'}
-          onClick={() =>
-            setTab('bank')
-          }
+          onClick={() => setTab('bank')}
           icon={<Library />}
         >
           题库
@@ -502,9 +527,7 @@ export default function Host() {
 
         <Nav
           active={tab === 'game'}
-          onClick={() =>
-            setTab('game')
-          }
+          onClick={() => setTab('game')}
           icon={<Settings />}
         >
           游戏设置
@@ -547,9 +570,7 @@ export default function Host() {
             current={current}
             players={players}
             answers={answers}
-            randomPublish={
-              randomPublish
-            }
+            randomPublish={randomPublish}
             qs={qs}
             publish={publish}
             error={error}
@@ -573,9 +594,7 @@ function Nav({
 }) {
   return (
     <button
-      className={
-        active ? 'active' : ''
-      }
+      className={active ? 'active' : ''}
       onClick={onClick}
     >
       {icon}
@@ -706,13 +725,10 @@ function RoomPanel({
             </p>
           )}
 
-          {room.phase ===
-            'lobby' && (
+          {room.phase === 'lobby' && (
             <button
               className="primary start-game"
-              disabled={
-                !players.length
-              }
+              disabled={!players.length}
               onClick={startRoom}
             >
               <Play />
@@ -720,8 +736,7 @@ function RoomPanel({
             </button>
           )}
 
-          {room.phase !==
-            'lobby' && (
+          {room.phase !== 'lobby' && (
             <div className="opened">
               游戏已开启 ·{' '}
               {room.round
@@ -778,6 +793,40 @@ function Bank({
 
   const [editorError, setEditorError] =
     useState('')
+
+  const binaryQuestions = useMemo(
+    () =>
+      qs.filter(
+        question =>
+          question.type === 'binary'
+      ),
+    [qs]
+  )
+
+  const usedIds = useMemo(
+    () =>
+      new Set(
+        getUsedQuestionIds(room)
+      ),
+    [room]
+  )
+
+  const usedCount =
+    binaryQuestions.filter(
+      question =>
+        usedIds.has(question.id)
+    ).length
+
+  const totalBinary =
+    binaryQuestions.length
+
+  const usedPercent =
+    totalBinary
+      ? Math.min(
+          100,
+          (usedCount / totalBinary) * 100
+        )
+      : 0
 
   const categories = useMemo(
     () => [
@@ -1037,6 +1086,55 @@ function Bank({
         <div>
           <h1>题库管理</h1>
 
+          {room && (
+            <div
+              style={{
+                width: 'min(420px, 100%)',
+                marginBottom: 14,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent:
+                    'space-between',
+                  gap: 12,
+                  fontSize: 12,
+                  color: '#667085',
+                  marginBottom: 6,
+                }}
+              >
+                <span>
+                  本房间出题进度
+                </span>
+
+                <strong>
+                  {usedCount} / {totalBinary}
+                </strong>
+              </div>
+
+              <div
+                style={{
+                  height: 8,
+                  borderRadius: 999,
+                  background: '#e7eaf1',
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    height: '100%',
+                    width: `${usedPercent}%`,
+                    background: '#6654f6',
+                    borderRadius: 999,
+                    transition:
+                      'width .25s ease',
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
           <div className="filters">
             <select
               value={category}
@@ -1108,69 +1206,105 @@ function Bank({
           />
         </div>
 
-        {filtered.map(question => (
-          <div
-            className="bank-row"
-            key={question.id}
-          >
-            <div>
-              <b>
-                {question.prompt}
-              </b>
+        {filtered.map(question => {
+          const alreadyUsed =
+            question.type ===
+              'binary' &&
+            usedIds.has(question.id)
 
-              <small>
-                <em>
-                  {question.type ===
-                  'binary'
-                    ? '二选一'
-                    : '排序题'}
-                </em>
+          return (
+            <div
+              className="bank-row"
+              key={question.id}
+              style={{
+                opacity:
+                  alreadyUsed
+                    ? 0.62
+                    : 1,
+              }}
+            >
+              <div>
+                <b>
+                  {question.prompt}
+                </b>
 
-                {'　'}
-                {question.category}
-              </small>
+                <small>
+                  <em>
+                    {question.type ===
+                    'binary'
+                      ? '二选一'
+                      : '排序题'}
+                  </em>
+
+                  {'　'}
+                  {question.category}
+
+                  {alreadyUsed && (
+                    <>
+                      {'　'}
+                      <strong
+                        style={{
+                          color:
+                            '#6654f6',
+                        }}
+                      >
+                        ✓ 已出
+                      </strong>
+                    </>
+                  )}
+                </small>
+              </div>
+
+              {room &&
+                room.phase !==
+                  'lobby' &&
+                room.phase !==
+                  'ended' &&
+                question.type ===
+                  'binary' && (
+                  <button
+                    title={
+                      alreadyUsed
+                        ? '本房间已经出过这道题'
+                        : '发布到当前游戏'
+                    }
+                    disabled={
+                      alreadyUsed
+                    }
+                    onClick={() =>
+                      void publish(
+                        question
+                      )
+                    }
+                  >
+                    {alreadyUsed
+                      ? '✓'
+                      : '⊙'}
+                  </button>
+                )}
+
+              <button
+                title="编辑"
+                onClick={() =>
+                  openEdit(question)
+                }
+              >
+                ✎
+              </button>
+
+              <button
+                title="删除"
+                onClick={() =>
+                  void remove(
+                    question
+                  )
+                }
+              >
+                ⋯
+              </button>
             </div>
-
-            {room &&
-              room.phase !==
-                'lobby' &&
-              room.phase !==
-                'ended' &&
-              question.type ===
-                'binary' && (
-                <button
-                  title="发布到当前游戏"
-                  onClick={() =>
-                    void publish(
-                      question
-                    )
-                  }
-                >
-                  ⊙
-                </button>
-              )}
-
-            <button
-              title="编辑"
-              onClick={() =>
-                openEdit(question)
-              }
-            >
-              ✎
-            </button>
-
-            <button
-              title="删除"
-              onClick={() =>
-                void remove(
-                  question
-                )
-              }
-            >
-              ⋯
-            </button>
-          </div>
-        ))}
+          )
+        })}
 
         {!filtered.length && (
           <div className="bank-empty">
@@ -1443,6 +1577,33 @@ function Game({
   const [pick, setPick] =
     useState('')
 
+  const used = new Set(
+    getUsedQuestionIds(room)
+  )
+
+  const activePlayerIds =
+    getRoundPlayerIds(room)
+
+  const activePlayers =
+    players.filter(player =>
+      activePlayerIds.includes(
+        player.id
+      )
+    )
+
+  const activeAnswers =
+    answers.filter(answer =>
+      activePlayerIds.includes(
+        answer.player_id
+      )
+    )
+
+  const expectedCount =
+    activePlayers.length
+
+  const answeredCount =
+    activeAnswers.length
+
   if (!room) {
     return (
       <>
@@ -1472,6 +1633,16 @@ function Game({
     room.phase === 'ready' ||
     !current
   ) {
+    const available =
+      qs.filter(
+        question =>
+          question.type ===
+            'binary' &&
+          !used.has(
+            question.id
+          )
+      )
+
     return (
       <>
         <h1>游戏控制</h1>
@@ -1494,16 +1665,11 @@ function Game({
               }
             >
               <option value="">
-                选择题库题目…
+                选择未出题目…
               </option>
 
-              {qs
-                .filter(
-                  question =>
-                    question.type ===
-                    'binary'
-                )
-                .map(question => (
+              {available.map(
+                question => (
                   <option
                     key={
                       question.id
@@ -1513,8 +1679,21 @@ function Game({
                     }
                   >
                     {question.prompt}
+                    {' · '}
+                    {
+                      question
+                        .options[0]
+                        ?.label
+                    }
+                    {' / '}
+                    {
+                      question
+                        .options[1]
+                        ?.label
+                    }
                   </option>
-                ))}
+                )
+              )}
             </select>
 
             <button
@@ -1558,18 +1737,18 @@ function Game({
     )
   }
 
-  const a = answers.filter(
+  const a = activeAnswers.filter(
     answer =>
       answer.choice === 'A'
   ).length
 
-  const b = answers.filter(
+  const b = activeAnswers.filter(
     answer =>
       answer.choice === 'B'
   ).length
 
   const total =
-    answers.length || 1
+    activeAnswers.length || 1
 
   return (
     <>
@@ -1609,8 +1788,8 @@ function Game({
 
         <div className="progress">
           <span>
-            {answers.length} /{' '}
-            {players.length}{' '}
+            {answeredCount} /{' '}
+            {expectedCount}{' '}
             已选择
           </span>
 
@@ -1618,10 +1797,10 @@ function Game({
             <b
               style={{
                 width: `${
-                  players.length
+                  expectedCount
                     ? (
-                        answers.length /
-                        players.length
+                        answeredCount /
+                        expectedCount
                       ) * 100
                     : 0
                 }%`,
@@ -1630,10 +1809,22 @@ function Game({
           </i>
         </div>
 
+        {players.length >
+          expectedCount &&
+          room.phase ===
+            'answering' && (
+            <div className="answering-note">
+              本题开始后有{' '}
+              {players.length -
+                expectedCount}{' '}
+              名新玩家加入，将从下一题开始参与
+            </div>
+          )}
+
         {room.phase ===
           'answering' && (
           <div className="answering-note">
-            等待所有玩家提交后自动揭晓
+            等待本轮所有玩家提交后自动揭晓
           </div>
         )}
 
@@ -1661,7 +1852,7 @@ function Game({
             </div>
 
             <div className="host-comments">
-              {answers
+              {activeAnswers
                 .filter(
                   answer =>
                     answer.comment
