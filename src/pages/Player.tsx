@@ -1176,92 +1176,95 @@ export default function Player() {
       <h1 className="reveal-title">
         揭晓！
       </h1>
+      {/* 揭晓时继续显示题目和具体选项 */}
+<section
+  style={{
+    background: '#ffffff',
+    borderRadius: 20,
+    padding: '16px 14px 14px',
+    marginBottom: 14,
+    color: '#172033',
+    border: '1px solid rgba(20, 28, 45, 0.08)',
+    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.08)',
+  }}
+>
+  <div
+    style={{
+      fontSize: 16,
+      lineHeight: 1.5,
+      fontWeight: 800,
+      textAlign: 'center',
+      color: '#172033',
+      marginBottom: 14,
+      wordBreak: 'break-word',
+    }}
+  >
+    {question.prompt}
+  </div>
 
-      {/* 揭晓时仍然显示题目 */}
-      <section
+  <div
+    style={{
+      display: 'grid',
+      gridTemplateColumns: '1fr 1fr',
+      gap: 10,
+    }}
+  >
+    <div
+      style={{
+        background: '#fff0f4',
+        border: '1px solid #ffd5e0',
+        borderRadius: 12,
+        padding: '11px 8px',
+        color: '#b92f5d',
+        textAlign: 'center',
+        fontSize: 14,
+        lineHeight: 1.4,
+        fontWeight: 800,
+        wordBreak: 'break-word',
+      }}
+    >
+      <div
         style={{
-          background:
-            'rgba(255,255,255,.96)',
-          borderRadius:
-            18,
-          padding:
-            '14px 14px 12px',
-          marginBottom:
-            12,
-          textAlign:
-            'center',
+          fontSize: 11,
+          opacity: 0.7,
+          marginBottom: 4,
         }}
       >
-        <div
-          style={{
-            fontSize: 14,
-            fontWeight:
-              700,
-            marginBottom:
-              10,
-          }}
-        >
-          {
-            question.prompt
-          }
-        </div>
+        A
+      </div>
 
-        <div
-          style={{
-            display:
-              'grid',
-            gridTemplateColumns:
-              '1fr 1fr',
-            gap: 8,
-          }}
-        >
-          <div
-            style={{
-              background:
-                '#fff0f4',
-              color:
-                '#d94b78',
-              borderRadius:
-                10,
-              padding:
-                '8px 6px',
-              fontSize:
-                12,
-              fontWeight:
-                700,
-            }}
-          >
-            A　{
-              question
-                .options[0]
-                ?.label
-            }
-          </div>
+      {question.options[0]?.label}
+    </div>
 
-          <div
-            style={{
-              background:
-                '#eef3ff',
-              color:
-                '#4d6acb',
-              borderRadius:
-                10,
-              padding:
-                '8px 6px',
-              fontSize:
-                12,
-              fontWeight:
-                700,
-            }}
-          >
-            B　{
-              question
-                .options[1]
-                ?.label
-            }
-          </div>
-        </div>
-      </section>
+    <div
+      style={{
+        background: '#eef3ff',
+        border: '1px solid #d7e0ff',
+        borderRadius: 12,
+        padding: '11px 8px',
+        color: '#3856b5',
+        textAlign: 'center',
+        fontSize: 14,
+        lineHeight: 1.4,
+        fontWeight: 800,
+        wordBreak: 'break-word',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          opacity: 0.7,
+          marginBottom: 4,
+        }}
+      >
+        B
+      </div>
+
+      {question.options[1]?.label}
+    </div>
+  </div>
+</section>
+
 
       <div className="reveal-board">
         <Side
