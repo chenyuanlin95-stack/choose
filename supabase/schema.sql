@@ -1,18 +1,17 @@
--- Run in Supabase SQL editor
+-- 二选一 multiplayer schema. Safe to run repeatedly in Supabase SQL Editor.
 create extension if not exists pgcrypto;
-create table if not exists questions(id uuid primary key default gen_random_uuid(),type text not null check(type in ('binary','ranking')),prompt text not null,options jsonb not null,category text default '未分类',enabled boolean default true,created_at timestamptz default now());
-create table if not exists rooms(id uuid primary key default gen_random_uuid(),code text unique not null,phase text not null default 'lobby' check(phase in ('lobby','answering','reveal')),current_question_id uuid references questions(id),round int default 0,host_token uuid default gen_random_uuid(),created_at timestamptz default now());
-create table if not exists players(id uuid primary key default gen_random_uuid(),room_id uuid references rooms(id) on delete cascade,name text not null,avatar int not null check(avatar between 0 and 19),joined_at timestamptz default now());
-create unique index if not exists unique_avatar_per_room on players(room_id,avatar);
-create table if not exists answers(id uuid primary key default gen_random_uuid(),room_id uuid references rooms(id) on delete cascade,question_id uuid references questions(id),player_id uuid references players(id) on delete cascade,choice text,ranking jsonb,comment text check(char_length(comment)<=80),created_at timestamptz default now(),unique(room_id,question_id,player_id));
--- Enable realtime for multiplayer tables
-alter publication supabase_realtime add table rooms;
-alter publication supabase_realtime add table players;
-alter publication supabase_realtime add table answers;
--- Prototype policies. Harden host authorization before public launch.
-alter table questions enable row level security; alter table rooms enable row level security; alter table players enable row level security; alter table answers enable row level security;
-create policy "public read questions" on questions for select using (enabled=true);
-create policy "prototype question write" on questions for all using (true) with check (true);
-create policy "prototype room access" on rooms for all using (true) with check (true);
-create policy "prototype player access" on players for all using (true) with check (true);
-create policy "prototype answer access" on answers for all using (true) with check (true);
+create table if not exists public.questions(id uuid primary key default gen_random_uuid(),type text not null default 'binary',prompt text not null,options jsonb not null,category text default '未分类',enabled boolean default true,created_at timestamptz default now());
+create table if not exists public.rooms(id uuid primary key default gen_random_uuid(),code text unique not null,phase text not null default 'lobby',current_question_id uuid,round int default 0,host_token uuid default gen_random_uuid(),created_at timestamptz default now());
+create table if not exists public.players(id uuid primary key default gen_random_uuid(),room_id uuid references public.rooms(id) on delete cascade,name text not null,avatar int not null,joined_at timestamptz default now());
+create table if not exists public.answers(id uuid primary key default gen_random_uuid(),room_id uuid references public.rooms(id) on delete cascade,question_id uuid,player_id uuid references public.players(id) on delete cascade,choice text,ranking jsonb,comment text,created_at timestamptz default now());
+alter table public.rooms add column if not exists phase text not null default 'lobby';alter table public.rooms add column if not exists current_question_id uuid;alter table public.rooms add column if not exists round int default 0;alter table public.rooms add column if not exists host_token uuid default gen_random_uuid();alter table public.rooms add column if not exists created_at timestamptz default now();
+alter table public.players add column if not exists joined_at timestamptz default now();
+alter table public.answers add column if not exists comment text;alter table public.answers add column if not exists created_at timestamptz default now();
+-- allow the explicit ended state used by the host
+alter table public.rooms drop constraint if exists rooms_phase_check;alter table public.rooms add constraint rooms_phase_check check(phase in ('lobby','answering','reveal','ended'));
+create unique index if not exists unique_avatar_per_room on public.players(room_id,avatar);create unique index if not exists unique_answer_per_round on public.answers(room_id,question_id,player_id);
+alter table public.questions enable row level security;alter table public.rooms enable row level security;alter table public.players enable row level security;alter table public.answers enable row level security;
+drop policy if exists "public read questions" on public.questions;drop policy if exists "prototype question write" on public.questions;drop policy if exists "prototype room access" on public.rooms;drop policy if exists "prototype player access" on public.players;drop policy if exists "prototype answer access" on public.answers;drop policy if exists "rooms_select_public" on public.rooms;drop policy if exists "rooms_insert_public" on public.rooms;drop policy if exists "rooms_update_public" on public.rooms;drop policy if exists "players_select_public" on public.players;drop policy if exists "players_insert_public" on public.players;
+create policy "public read questions" on public.questions for select to anon,authenticated using (true);create policy "prototype question write" on public.questions for all to anon,authenticated using (true) with check (true);create policy "prototype room access" on public.rooms for all to anon,authenticated using (true) with check (true);create policy "prototype player access" on public.players for all to anon,authenticated using (true) with check (true);create policy "prototype answer access" on public.answers for all to anon,authenticated using (true) with check (true);
+-- Add tables to realtime only if they are not already members.
+do $$ begin if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='rooms') then alter publication supabase_realtime add table public.rooms;end if;if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='players') then alter publication supabase_realtime add table public.players;end if;if not exists(select 1 from pg_publication_tables where pubname='supabase_realtime' and schemaname='public' and tablename='answers') then alter publication supabase_realtime add table public.answers;end if;end $$;
