@@ -12,6 +12,10 @@ import type {
   Room,
 } from '../types'
 
+type RoomGameState = Room & {
+  used_question_ids?: string[] | null
+  round_player_ids?: string[] | null
+}
 
 export default function Player() {
   const { code = '' } = useParams()
@@ -26,41 +30,83 @@ export default function Player() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
 
-  const storageKey = `erxuanyi_player_${code}`
+  const storageKey =
+    `erxuanyi_player_${code}`
 
   const myAnswer = useMemo(() => {
     if (!me) return undefined
 
     return answers.find(
-      answer => answer.player_id === me.id
+      answer =>
+        answer.player_id === me.id
     )
   }, [answers, me])
 
-  const joined = Boolean(me && room)
+  const joined =
+    Boolean(me && room)
+
+  const currentRoundPlayerIds =
+    (
+      room as
+        | RoomGameState
+        | null
+    )?.round_player_ids ?? []
+
+  const isCurrentRoundPlayer =
+    Boolean(
+      me &&
+      currentRoundPlayerIds.includes(
+        me.id
+      )
+    )
+
+  const currentRoundPlayers =
+    players.filter(player =>
+      currentRoundPlayerIds.includes(
+        player.id
+      )
+    )
+
+  const currentRoundAnswers =
+    answers.filter(answer =>
+      currentRoundPlayerIds.includes(
+        answer.player_id
+      )
+    )
 
   const refresh = async (
     roomId: string,
     player?: PlayerType
   ) => {
-    const { data: roomData, error: roomError } =
-      await supabase
-        .from('rooms')
-        .select('*')
-        .eq('id', roomId)
-        .maybeSingle()
+    const {
+      data: roomData,
+      error: roomError,
+    } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('id', roomId)
+      .maybeSingle()
 
-    if (roomError || !roomData) {
-      localStorage.removeItem(storageKey)
+    if (
+      roomError ||
+      !roomData
+    ) {
+      localStorage.removeItem(
+        storageKey
+      )
+
       setRoom(null)
       setMe(null)
       setPlayers([])
       setAnswers([])
       setQuestion(null)
       setLoading(false)
+
       return
     }
 
-    const nextRoom = roomData as Room
+    const nextRoom =
+      roomData as Room
 
     setRoom(nextRoom)
 
@@ -68,34 +114,50 @@ export default function Player() {
       await supabase
         .from('players')
         .select('*')
-        .eq('room_id', roomId)
+        .eq(
+          'room_id',
+          roomId
+        )
         .order('joined_at')
 
     const nextPlayers =
-      (playerData ?? []) as PlayerType[]
+      (playerData ??
+        []) as PlayerType[]
 
     setPlayers(nextPlayers)
 
     if (player) {
-      const stillExists = nextPlayers.some(
-        item => item.id === player.id
-      )
+      const stillExists =
+        nextPlayers.some(
+          item =>
+            item.id ===
+            player.id
+        )
 
       if (stillExists) {
         setMe(player)
       } else {
-        localStorage.removeItem(storageKey)
+        localStorage.removeItem(
+          storageKey
+        )
+
         setMe(null)
       }
     }
 
-    if (nextRoom.current_question_id) {
-      const { data: questionData } =
-        await supabase
-          .from('questions')
-          .select('*')
-          .eq('id', nextRoom.current_question_id)
-          .maybeSingle()
+    if (
+      nextRoom.current_question_id
+    ) {
+      const {
+        data: questionData,
+      } = await supabase
+        .from('questions')
+        .select('*')
+        .eq(
+          'id',
+          nextRoom.current_question_id
+        )
+        .maybeSingle()
 
       setQuestion(
         questionData
@@ -103,19 +165,24 @@ export default function Player() {
           : null
       )
 
-      const { data: answerData } =
-        await supabase
-          .from('answers')
-          .select('*')
-          .eq('room_id', roomId)
-          .eq(
-            'question_id',
-            nextRoom.current_question_id
-          )
-          .order('created_at')
+      const {
+        data: answerData,
+      } = await supabase
+        .from('answers')
+        .select('*')
+        .eq(
+          'room_id',
+          roomId
+        )
+        .eq(
+          'question_id',
+          nextRoom.current_question_id
+        )
+        .order('created_at')
 
       setAnswers(
-        (answerData ?? []) as Answer[]
+        (answerData ??
+          []) as Answer[]
       )
     } else {
       setQuestion(null)
@@ -125,12 +192,14 @@ export default function Player() {
     setLoading(false)
   }
 
-
   /*
-   * 恢复当前玩家
+   * 恢复玩家身份
    */
   useEffect(() => {
-    const saved = localStorage.getItem(storageKey)
+    const saved =
+      localStorage.getItem(
+        storageKey
+      )
 
     if (!saved) {
       setLoading(false)
@@ -139,26 +208,36 @@ export default function Player() {
 
     try {
       const player =
-        JSON.parse(saved) as PlayerType
+        JSON.parse(
+          saved
+        ) as PlayerType
 
-      void refresh(player.room_id, player)
+      void refresh(
+        player.room_id,
+        player
+      )
     } catch {
-      localStorage.removeItem(storageKey)
+      localStorage.removeItem(
+        storageKey
+      )
+
       setLoading(false)
     }
   }, [code])
 
-
   /*
-   * Supabase realtime
+   * Realtime
    */
   useEffect(() => {
     if (!room) return
 
-    const roomId = room.id
+    const roomId =
+      room.id
 
     const channel = supabase
-      .channel(`player-live-${roomId}`)
+      .channel(
+        `player-live-${roomId}`
+      )
 
       .on(
         'postgres_changes',
@@ -166,10 +245,14 @@ export default function Player() {
           event: '*',
           schema: 'public',
           table: 'rooms',
-          filter: `id=eq.${roomId}`,
+          filter:
+            `id=eq.${roomId}`,
         },
         () => {
-          void refresh(roomId, me ?? undefined)
+          void refresh(
+            roomId,
+            me ?? undefined
+          )
         }
       )
 
@@ -179,10 +262,14 @@ export default function Player() {
           event: '*',
           schema: 'public',
           table: 'players',
-          filter: `room_id=eq.${roomId}`,
+          filter:
+            `room_id=eq.${roomId}`,
         },
         () => {
-          void refresh(roomId, me ?? undefined)
+          void refresh(
+            roomId,
+            me ?? undefined
+          )
         }
       )
 
@@ -192,93 +279,162 @@ export default function Player() {
           event: '*',
           schema: 'public',
           table: 'answers',
-          filter: `room_id=eq.${roomId}`,
+          filter:
+            `room_id=eq.${roomId}`,
         },
         () => {
-          void refresh(roomId, me ?? undefined)
+          void refresh(
+            roomId,
+            me ?? undefined
+          )
         }
       )
 
       .subscribe()
 
     return () => {
-      void supabase.removeChannel(channel)
+      void supabase.removeChannel(
+        channel
+      )
     }
-  }, [room?.id, room?.current_question_id, me?.id])
-
+  }, [
+    room?.id,
+    room?.current_question_id,
+    me?.id,
+  ])
 
   /*
    * 加入房间
+   * 现在游戏开始后也允许加入。
    */
   const join = async () => {
-    const cleanName = name.trim()
+    const cleanName =
+      name.trim()
 
     if (!cleanName) return
 
     setError('')
 
-    const { data: roomData, error: roomError } =
-      await supabase
-        .from('rooms')
-        .select('*')
-        .eq('code', code)
-        .eq('phase', 'lobby')
-        .maybeSingle()
+    const {
+      data: roomData,
+      error: roomError,
+    } = await supabase
+      .from('rooms')
+      .select('*')
+      .eq('code', code)
+      .maybeSingle()
 
-    if (roomError || !roomData) {
-      setError('房间不存在，或者房主已经开启游戏')
-      return
-    }
-
-    const targetRoom = roomData as Room
-
-    const { data: existingPlayers } =
-      await supabase
-        .from('players')
-        .select('avatar')
-        .eq('room_id', targetRoom.id)
-
-    if ((existingPlayers?.length ?? 0) >= 20) {
-      setError('房间已经满员')
-      return
-    }
-
-    const usedAvatars = new Set(
-      (existingPlayers ?? []).map(
-        player => player.avatar
+    if (
+      roomError ||
+      !roomData
+    ) {
+      setError(
+        '房间不存在'
       )
-    )
+      return
+    }
 
-    const freeAvatars = Array
-      .from({ length: 20 }, (_, index) => index)
-      .filter(index => !usedAvatars.has(index))
+    const targetRoom =
+      roomData as Room
 
-    if (!freeAvatars.length) {
-      setError('暂时没有可用头像')
+    if (
+      targetRoom.phase ===
+      'ended'
+    ) {
+      setError(
+        '这个房间已经结束'
+      )
+      return
+    }
+
+    const {
+      data:
+        existingPlayers,
+    } = await supabase
+      .from('players')
+      .select('avatar')
+      .eq(
+        'room_id',
+        targetRoom.id
+      )
+
+    if (
+      (
+        existingPlayers
+          ?.length ?? 0
+      ) >= 20
+    ) {
+      setError(
+        '房间已经满员'
+      )
+      return
+    }
+
+    const usedAvatars =
+      new Set(
+        (
+          existingPlayers ??
+          []
+        ).map(
+          player =>
+            player.avatar
+        )
+      )
+
+    const freeAvatars =
+      Array.from(
+        {
+          length: 20,
+        },
+        (_, index) =>
+          index
+      ).filter(
+        index =>
+          !usedAvatars.has(
+            index
+          )
+      )
+
+    if (
+      !freeAvatars.length
+    ) {
+      setError(
+        '暂时没有可用头像'
+      )
       return
     }
 
     const avatar =
       freeAvatars[
         Math.floor(
-          Math.random() * freeAvatars.length
+          Math.random() *
+            freeAvatars.length
         )
       ]
 
-    const { data: playerData, error: playerError } =
-      await supabase
-        .from('players')
-        .insert({
-          room_id: targetRoom.id,
-          name: cleanName,
-          avatar,
-        })
-        .select('*')
-        .single()
+    const {
+      data: playerData,
+      error: playerError,
+    } = await supabase
+      .from('players')
+      .insert({
+        room_id:
+          targetRoom.id,
+        name:
+          cleanName,
+        avatar,
+      })
+      .select('*')
+      .single()
 
-    if (playerError || !playerData) {
+    if (
+      playerError ||
+      !playerData
+    ) {
       setError(
-        playerError?.message ?? '加入房间失败'
+        playerError
+          ?.message ??
+          '加入房间失败'
       )
       return
     }
@@ -288,7 +444,9 @@ export default function Player() {
 
     localStorage.setItem(
       storageKey,
-      JSON.stringify(newPlayer)
+      JSON.stringify(
+        newPlayer
+      )
     )
 
     setMe(newPlayer)
@@ -300,57 +458,88 @@ export default function Player() {
     )
   }
 
-
   /*
-   * 提交二选一
+   * 提交答案
    */
-  const submit = async (choice: 'A' | 'B') => {
+  const submit = async (
+    choice: 'A' | 'B'
+  ) => {
     if (
       !room ||
       !question ||
       !me ||
       myAnswer ||
-      room.phase !== 'answering'
+      room.phase !==
+        'answering'
     ) {
+      return
+    }
+
+    const allowedIds =
+      (
+        room as RoomGameState
+      ).round_player_ids ??
+      []
+
+    if (
+      !allowedIds.includes(
+        me.id
+      )
+    ) {
+      setError(
+        '你从下一题开始参与'
+      )
       return
     }
 
     setError('')
 
-    const { error: answerError } =
-      await supabase
-        .from('answers')
-        .insert({
-          room_id: room.id,
-          question_id: question.id,
-          player_id: me.id,
-          choice,
-          comment:
-            comment.trim() || null,
-        })
+    const {
+      error:
+        answerError,
+    } = await supabase
+      .from('answers')
+      .insert({
+        room_id:
+          room.id,
+        question_id:
+          question.id,
+        player_id:
+          me.id,
+        choice,
+        comment:
+          comment.trim() ||
+          null,
+      })
 
     if (answerError) {
-      /*
-       * 唯一索引会阻止同一玩家重复回答。
-       */
-      if (answerError.code === '23505') {
-        await refresh(room.id, me)
+      if (
+        answerError.code ===
+        '23505'
+      ) {
+        await refresh(
+          room.id,
+          me
+        )
+
         return
       }
 
-      setError(answerError.message)
+      setError(
+        answerError.message
+      )
+
       return
     }
 
     setComment('')
 
-    await refresh(room.id, me)
+    await refresh(
+      room.id,
+      me
+    )
   }
 
-
-  /*
-   * 初始恢复中
-   */
   if (loading) {
     return (
       <Shell>
@@ -361,11 +550,13 @@ export default function Player() {
     )
   }
 
-
   /*
-   * 1. 加入房间
+   * 加入页
    */
-  if (!joined || !me) {
+  if (
+    !joined ||
+    !me
+  ) {
     return (
       <Shell>
         <div className="brand small">
@@ -373,7 +564,9 @@ export default function Player() {
         </div>
 
         <section className="white-card">
-          <h2>加入房间</h2>
+          <h2>
+            加入房间
+          </h2>
 
           <label>
             房间号
@@ -390,8 +583,13 @@ export default function Player() {
             <input
               placeholder="输入昵称"
               value={name}
-              onChange={event =>
-                setName(event.target.value)
+              onChange={
+                event =>
+                  setName(
+                    event
+                      .target
+                      .value
+                  )
               }
               maxLength={12}
             />
@@ -420,22 +618,17 @@ export default function Player() {
     )
   }
 
-
-  /*
-   * 到这里之后，TypeScript 已经明确知道
-   * room 不可能是 null。
-   *
-   * 这就是修复 Vercel TS18047 的关键。
-   */
   if (!room) {
     return null
   }
 
-
   /*
-   * 房主结束房间
+   * 已结束
    */
-  if (room.phase === 'ended') {
+  if (
+    room.phase ===
+    'ended'
+  ) {
     return (
       <Shell>
         <Header
@@ -444,7 +637,9 @@ export default function Player() {
         />
 
         <section className="white-card">
-          <h2>本场游戏已结束</h2>
+          <h2>
+            本场游戏已结束
+          </h2>
 
           <p>
             感谢参与 ✨
@@ -454,11 +649,13 @@ export default function Player() {
     )
   }
 
-
   /*
-   * 2 + 3. 已加入 / 等待房主
+   * 大厅
    */
-  if (room.phase === 'lobby') {
+  if (
+    room.phase ===
+    'lobby'
+  ) {
     return (
       <Shell>
         <Header
@@ -467,31 +664,29 @@ export default function Player() {
         />
 
         <div className="player-welcome">
-          <h2>欢迎加入！</h2>
+          <h2>
+            欢迎加入！
+          </h2>
 
-          <p>这是你的专属头像</p>
+          <p>
+            这是你的专属头像
+          </p>
 
           <AnimalAvatar
             index={me.avatar}
             size={118}
           />
 
-          <strong>{me.name}</strong>
+          <strong>
+            {me.name}
+          </strong>
         </div>
 
-        <div className="avatar-grid">
-          {players.map(player => (
-            <div key={player.id}>
-              <AnimalAvatar
-                index={player.avatar}
-              />
-
-              <span>
-                {player.name}
-              </span>
-            </div>
-          ))}
-        </div>
+        <PlayerGrid
+          players={
+            players
+          }
+        />
 
         <div className="wait-pill">
           等待房主开始…
@@ -500,13 +695,12 @@ export default function Player() {
     )
   }
 
-
   /*
-   * 房主已经点“开启游戏”
-   * 但还没发布第一题
+   * 已开启但还没发题
    */
   if (
-    room.phase === 'ready' ||
+    room.phase ===
+      'ready' ||
     !question
   ) {
     return (
@@ -516,19 +710,11 @@ export default function Player() {
           round="游戏已开启"
         />
 
-        <div className="avatar-grid">
-          {players.map(player => (
-            <div key={player.id}>
-              <AnimalAvatar
-                index={player.avatar}
-              />
-
-              <span>
-                {player.name}
-              </span>
-            </div>
-          ))}
-        </div>
+        <PlayerGrid
+          players={
+            players
+          }
+        />
 
         <div className="wait-pill">
           房主正在选择第一题…
@@ -537,19 +723,67 @@ export default function Player() {
     )
   }
 
-
   /*
-   * 4. 答题页面
+   * 中途加入：
+   * 当前题不参与。
    */
   if (
-    room.phase === 'answering' &&
+    room.phase ===
+      'answering' &&
+    !isCurrentRoundPlayer
+  ) {
+    return (
+      <Shell>
+        <Header
+          code={code}
+          round={
+            `第 ${room.round} 题`
+          }
+        />
+
+        <div className="player-welcome">
+          <h2>
+            欢迎加入！
+          </h2>
+
+          <AnimalAvatar
+            index={me.avatar}
+            size={100}
+          />
+
+          <strong>
+            {me.name}
+          </strong>
+        </div>
+
+        <div className="wait-pill">
+          本题已经开始
+
+          <br />
+
+          <small>
+            你将从下一题开始参与 ✨
+          </small>
+        </div>
+      </Shell>
+    )
+  }
+
+  /*
+   * 答题
+   */
+  if (
+    room.phase ===
+      'answering' &&
     !myAnswer
   ) {
     return (
       <Shell>
         <Header
           code={code}
-          round={`第 ${room.round} 题`}
+          round={
+            `第 ${room.round} 题`
+          }
         />
 
         <section className="question-card">
@@ -567,7 +801,11 @@ export default function Player() {
               void submit('A')
             }}
           >
-            {question.options[0]?.label}
+            {
+              question
+                .options[0]
+                ?.label
+            }
           </button>
 
           <b className="vs">
@@ -580,26 +818,36 @@ export default function Player() {
               void submit('B')
             }}
           >
-            {question.options[1]?.label}
+            {
+              question
+                .options[1]
+                ?.label
+            }
           </button>
 
           <label className="comment-label">
             💬 我有话说
-            <span>（可选）</span>
+            <span>
+              （可选）
+            </span>
 
             <textarea
               value={comment}
-              onChange={event =>
-                setComment(
-                  event.target.value
-                )
+              onChange={
+                event =>
+                  setComment(
+                    event
+                      .target
+                      .value
+                  )
               }
               placeholder="补一句条件、吐槽或者嘴硬…"
               maxLength={80}
             />
 
             <small>
-              {comment.length}/80
+              {comment.length}
+              /80
             </small>
           </label>
 
@@ -613,85 +861,120 @@ export default function Player() {
     )
   }
 
-
   /*
-   * 5. 自己已答，等待其他人
+   * 已答，等待本轮玩家
    */
   if (
-    room.phase === 'answering' &&
+    room.phase ===
+      'answering' &&
     myAnswer
   ) {
     return (
       <Shell>
         <Header
           code={code}
-          round={`第 ${room.round} 题`}
+          round={
+            `第 ${room.round} 题`
+          }
         />
 
         <h1 className="count">
-          {answers.length} / {players.length}
+          {
+            currentRoundAnswers
+              .length
+          }{' '}
+          /{' '}
+          {
+            currentRoundPlayers
+              .length
+          }
         </h1>
 
-        <Floaters players={players} />
+        <Floaters
+          players={
+            currentRoundPlayers
+          }
+        />
 
         <div className="wait-pill">
-          你已选择 {myAnswer.choice}
+          你已选择{' '}
+          {myAnswer.choice}
 
           <br />
 
           <small>
             等待其他玩家…
             <br />
-            所有人选择后自动揭晓
+            本轮所有人选择后自动揭晓
           </small>
         </div>
       </Shell>
     )
   }
 
-
   /*
-   * 6. 揭晓
+   * 揭晓
    */
-  const aPlayers = answers
-    .filter(answer => answer.choice === 'A')
-    .map(answer =>
-      players.find(
-        player =>
-          player.id === answer.player_id
+  const aPlayers =
+    currentRoundAnswers
+      .filter(
+        answer =>
+          answer.choice ===
+          'A'
       )
-    )
-    .filter(
-      (player): player is PlayerType =>
-        Boolean(player)
-    )
-
-  const bPlayers = answers
-    .filter(answer => answer.choice === 'B')
-    .map(answer =>
-      players.find(
-        player =>
-          player.id === answer.player_id
+      .map(answer =>
+        players.find(
+          player =>
+            player.id ===
+            answer.player_id
+        )
       )
-    )
-    .filter(
-      (player): player is PlayerType =>
-        Boolean(player)
-    )
+      .filter(
+        (
+          player
+        ): player is PlayerType =>
+          Boolean(player)
+      )
 
-  const total = answers.length || 1
+  const bPlayers =
+    currentRoundAnswers
+      .filter(
+        answer =>
+          answer.choice ===
+          'B'
+      )
+      .map(answer =>
+        players.find(
+          player =>
+            player.id ===
+            answer.player_id
+        )
+      )
+      .filter(
+        (
+          player
+        ): player is PlayerType =>
+          Boolean(player)
+      )
 
-  const comments = answers.filter(
-    answer =>
-      answer.comment &&
-      answer.comment.trim()
-  )
+  const total =
+    currentRoundAnswers
+      .length || 1
+
+  const comments =
+    currentRoundAnswers.filter(
+      answer =>
+        answer.comment &&
+        answer.comment.trim()
+    )
 
   return (
     <Shell>
       <Header
         code={code}
-        round={`第 ${room.round} 题`}
+        round={
+          `第 ${room.round} 题`
+        }
       />
 
       <h1 className="reveal-title">
@@ -702,42 +985,60 @@ export default function Player() {
         <Side
           side="A"
           pct={`${Math.round(
-            aPlayers.length /
-              total *
-              100
+            (
+              aPlayers
+                .length /
+              total
+            ) * 100
           )}%`}
-          players={aPlayers}
+          players={
+            aPlayers
+          }
         />
 
         <Side
           side="B"
           pct={`${Math.round(
-            bPlayers.length /
-              total *
-              100
+            (
+              bPlayers
+                .length /
+              total
+            ) * 100
           )}%`}
-          players={bPlayers}
+          players={
+            bPlayers
+          }
         />
       </div>
 
       <AnimatePresence>
         {comments.map(
-          (answer, index) => {
+          (
+            answer,
+            index
+          ) => {
             const player =
               players.find(
                 item =>
                   item.id ===
-                  answer.player_id
+                  answer
+                    .player_id
               )
 
             return (
               <motion.div
-                key={answer.id}
+                key={
+                  answer.id
+                }
                 className="flying-comment"
                 style={{
                   top:
                     80 +
-                    (index % 5) * 42,
+                    (
+                      index %
+                      5
+                    ) *
+                      42,
                 }}
                 initial={{
                   x: '100vw',
@@ -755,17 +1056,22 @@ export default function Player() {
                 transition={{
                   duration: 6,
                   delay:
-                    index * 0.45,
+                    index *
+                    0.45,
                 }}
               >
                 <AnimalAvatar
                   index={
-                    player?.avatar ?? 0
+                    player
+                      ?.avatar ??
+                    0
                   }
                   size={34}
                 />
 
-                {answer.comment}
+                {
+                  answer.comment
+                }
               </motion.div>
             )
           }
@@ -773,39 +1079,58 @@ export default function Player() {
       </AnimatePresence>
 
       <section className="discussion">
-        <h3>大家有话说</h3>
+        <h3>
+          大家有话说
+        </h3>
 
-        {comments.length === 0 && (
+        {comments.length ===
+          0 && (
           <p className="muted">
             这一题大家都很安静 👀
           </p>
         )}
 
-        {comments.map(answer => {
-          const player =
-            players.find(
-              item =>
-                item.id ===
-                answer.player_id
-            )
+        {comments.map(
+          answer => {
+            const player =
+              players.find(
+                item =>
+                  item.id ===
+                  answer
+                    .player_id
+              )
 
-          return (
-            <p key={answer.id}>
-              <AnimalAvatar
-                index={
-                  player?.avatar ?? 0
+            return (
+              <p
+                key={
+                  answer.id
                 }
-                size={30}
-              />
+              >
+                <AnimalAvatar
+                  index={
+                    player
+                      ?.avatar ??
+                    0
+                  }
+                  size={30}
+                />
 
-              <b>
-                {player?.name ?? '玩家'}：
-              </b>
+                <b>
+                  {
+                    player
+                      ?.name ??
+                    '玩家'
+                  }
+                  ：
+                </b>
 
-              {answer.comment}
-            </p>
-          )
-        })}
+                {
+                  answer.comment
+                }
+              </p>
+            )
+          }
+        )}
       </section>
 
       <div className="wait-pill">
@@ -815,6 +1140,37 @@ export default function Player() {
   )
 }
 
+function PlayerGrid({
+  players,
+}: {
+  players: PlayerType[]
+}) {
+  return (
+    <div className="avatar-grid">
+      {players.map(
+        player => (
+          <div
+            key={
+              player.id
+            }
+          >
+            <AnimalAvatar
+              index={
+                player.avatar
+              }
+            />
+
+            <span>
+              {
+                player.name
+              }
+            </span>
+          </div>
+        )
+      )}
+    </div>
+  )
+}
 
 function Shell({
   children,
@@ -829,7 +1185,6 @@ function Shell({
     </main>
   )
 }
-
 
 function Header({
   code,
@@ -855,7 +1210,6 @@ function Header({
   )
 }
 
-
 function Floaters({
   players,
 }: {
@@ -864,31 +1218,46 @@ function Floaters({
   return (
     <div className="float-zone">
       {players.map(
-        (player, index) => (
+        (
+          player,
+          index
+        ) => (
           <motion.div
-            key={player.id}
+            key={
+              player.id
+            }
             className="floater"
             style={{
               left: `${
                 12 +
-                (index * 23) % 72
+                (
+                  index *
+                  23
+                ) %
+                  72
               }%`,
               top: `${
                 12 +
-                (index * 31) % 70
+                (
+                  index *
+                  31
+                ) %
+                  70
               }%`,
             }}
             animate={{
               x: [
                 0,
-                index % 2
+                index %
+                  2
                   ? 12
                   : -10,
                 0,
               ],
               y: [
                 0,
-                index % 3
+                index %
+                  3
                   ? 8
                   : -12,
                 0,
@@ -897,18 +1266,25 @@ function Floaters({
             transition={{
               duration:
                 3 +
-                index * 0.25,
-              repeat: Infinity,
-              ease: 'easeInOut',
+                index *
+                  0.25,
+              repeat:
+                Infinity,
+              ease:
+                'easeInOut',
             }}
           >
             <AnimalAvatar
-              index={player.avatar}
+              index={
+                player.avatar
+              }
               size={48}
             />
 
             <span>
-              {player.name}
+              {
+                player.name
+              }
             </span>
           </motion.div>
         )
@@ -916,7 +1292,6 @@ function Floaters({
     </div>
   )
 }
-
 
 function Side({
   side,
@@ -929,7 +1304,9 @@ function Side({
 }) {
   return (
     <div
-      className={`reveal-side ${side.toLowerCase()}`}
+      className={
+        `reveal-side ${side.toLowerCase()}`
+      }
     >
       <h2>
         {side}
@@ -940,13 +1317,19 @@ function Side({
       </h2>
 
       {players.map(
-        (player, index) => (
+        (
+          player,
+          index
+        ) => (
           <motion.div
             className="side-player"
-            key={player.id}
+            key={
+              player.id
+            }
             initial={{
               x:
-                side === 'A'
+                side ===
+                'A'
                   ? 120
                   : -120,
               y: -80,
@@ -959,17 +1342,23 @@ function Side({
             }}
             transition={{
               delay:
-                index * 0.12,
-              type: 'spring',
+                index *
+                0.12,
+              type:
+                'spring',
             }}
           >
             <AnimalAvatar
-              index={player.avatar}
+              index={
+                player.avatar
+              }
               size={36}
             />
 
             <span>
-              {player.name}
+              {
+                player.name
+              }
             </span>
           </motion.div>
         )
