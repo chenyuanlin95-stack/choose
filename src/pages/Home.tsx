@@ -1,0 +1,1 @@
+import {useNavigate} from 'react-router-dom';export default function Home(){const nav=useNavigate();return <main className="star-bg center-page"><div className="hero-card"><div className="brand">二选一</div><p>朋友聚会 · 必须站队</p><button className="primary" onClick={()=>nav('/join/8236')}>加入房间</button><button className="ghost" onClick={()=>nav('/host')}>打开主控台</button></div></main>}

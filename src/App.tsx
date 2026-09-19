@@ -1,0 +1,1 @@
+import {Routes,Route,Navigate} from 'react-router-dom';import Home from './pages/Home';import Player from './pages/Player';import Host from './pages/Host';export default function App(){return <Routes><Route path="/" element={<Home/>}/><Route path="/join/:code?" element={<Player/>}/><Route path="/host" element={<Host/>}/><Route path="*" element={<Navigate to="/"/>}/></Routes>}
