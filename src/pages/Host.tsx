@@ -4,7 +4,9 @@ import {
   Home,
   Library,
   Settings,
-  Palette,
+  Copy,
+  Check,
+  Radio,
   Plus,
   Play,
   Shuffle,
@@ -12,6 +14,7 @@ import {
   Search,
 } from 'lucide-react'
 
+import { Side } from './Player'
 import { AnimalAvatar } from '../lib/avatars'
 import { demoQuestions } from '../lib/demo'
 import { configured, supabase } from '../lib/supabase'
@@ -124,6 +127,9 @@ const normalizeQuestion = (
 }
 
 export default function Host() {
+  const publishLock = useRef(false);
+  const [copied, setCopied] = useState(false);
+  const [restoring, setRestoring] = useState(true);
   const [tab, setTab] =
     useState<Tab>('room')
 
@@ -135,7 +141,7 @@ export default function Host() {
 
   const [qs, setQs] =
     useState<Question[]>(
-      demoQuestions.map(normalizeQuestion)
+      configured ? [] : demoQuestions.map(normalizeQuestion)
     )
 
   const [answers, setAnswers] =
@@ -176,10 +182,14 @@ export default function Host() {
       (data as Room).phase ===
         'ended'
     ) {
+      if (loadError) { setError('房间恢复失败，请刷新重试'); setRestoring(false); return; }
       resetLocal()
+      setRestoring(false);
       return
     }
 
+    setRestoring(false);
+    roomRef.current=data as Room;
     setRoom(data as Room)
   }
 
@@ -229,13 +239,13 @@ export default function Host() {
 
   const loadQuestions =
     async () => {
-      const { data } =
+      const { data, error: questionError } =
         await supabase
           .from('questions')
           .select('*')
-          .eq('enabled', true)
           .order('created_at')
 
+      if (questionError) { setError('读取题库失败，请刷新重试'); return; }
       if (data) {
         setQs(
           data.map(
@@ -246,6 +256,7 @@ export default function Host() {
     }
 
   useEffect(() => {
+    if (!configured) { setRestoring(false); return; }
     void loadQuestions()
 
     const id =
@@ -255,7 +266,7 @@ export default function Host() {
 
     if (id) {
       void loadRoom(id)
-    }
+    } else { setRestoring(false); }
   }, [])
 
   useEffect(() => {
@@ -270,6 +281,7 @@ export default function Host() {
     void loadAnswers(room)
 
     const id = room.id
+    const poll = setInterval(() => { void loadRoom(id); void loadPlayers(id); if(roomRef.current) void loadAnswers(roomRef.current); }, 3000)
 
     const channel =
       supabase
@@ -327,6 +339,7 @@ export default function Host() {
         .subscribe()
 
     return () => {
+      clearInterval(poll);
       void supabase.removeChannel(
         channel
       )
@@ -356,10 +369,7 @@ export default function Host() {
 
     const answeredIds =
       new Set(
-        answers.map(
-          answer =>
-            answer.player_id
-        )
+        answers.filter(answer => answer.question_id === room.current_question_id).map(answer => answer.player_id)
       )
 
     const allAnswered =
@@ -375,6 +385,7 @@ export default function Host() {
         phase: 'reveal',
       })
       .eq('id', room.id)
+      .eq('current_question_id', room.current_question_id)
       .eq(
         'phase',
         'answering'
@@ -395,7 +406,9 @@ export default function Host() {
     async () => {
       setError('')
 
-      if (room) return
+      if (room || restoring || publishLock.current) return;
+      publishLock.current=true;
+      try {
 
       for (
         let i = 0;
@@ -453,6 +466,7 @@ export default function Host() {
       setError(
         '没有成功生成房间号，请再试一次'
       )
+      } finally { publishLock.current=false; }
     }
 
   const startRoom =
@@ -627,72 +641,24 @@ export default function Host() {
       return
     }
 
-    const previousUsed =
-      getUsedQuestionIds(
-        room
-      )
-
-    if (
-      previousUsed.includes(
-        question.id
-      )
-    ) {
-      setError(
-        '这道题本房间已经出过了'
-      )
-      return
-    }
-
-    const currentPlayerIds =
-      players.map(
-        player => player.id
-      )
-
-    if (
-      !currentPlayerIds.length
-    ) {
-      setError(
-        '当前没有玩家，无法发布题目'
-      )
-      return
-    }
-
-    setError('')
-
-    const {
-      error:
-        publishError,
-    } = await supabase
-      .from('rooms')
-      .update({
-        phase: 'answering',
-        current_question_id:
-          question.id,
-        round:
-          room.round + 1,
-        used_question_ids: [
-          ...previousUsed,
-          question.id,
-        ],
-        round_player_ids:
-          currentPlayerIds,
-      })
-      .eq('id', room.id)
-
-    if (publishError) {
-      setError(
-        publishError.message
-      )
-      return
-    }
-
-    setAnswers([])
-
-    await loadRoom(
-      room.id
-    )
-
-    setTab('game')
+    if (!question.enabled) { setError('这道题已经停用'); return; }
+    if (room.phase === 'answering') { setError('请等待本题揭晓后再发下一题'); return; }
+    if (publishLock.current) return;
+    publishLock.current=true;
+    try {
+      const {data:freshRoom,error:readError}=await supabase.from('rooms').select('*').eq('id',room.id).single();
+      if(readError || !freshRoom){setError('读取房间失败，请重试');return;}
+      const latest=freshRoom as Room;
+      if(!['ready','reveal'].includes(latest.phase)){setError('房间状态已变化，请稍后重试');await loadRoom(room.id);return;}
+      const previousUsed=getUsedQuestionIds(latest);
+      if(previousUsed.includes(question.id)){setError('这道题本局已经出过了');return;}
+      const {data:latestPlayers,error:playersError}=await supabase.from('players').select('id').eq('room_id',room.id);
+      if(playersError || !latestPlayers?.length){setError(playersError?'读取玩家失败，请重试':'当前没有玩家，无法发布题目');return;}
+      const {data,error:publishError}=await supabase.from('rooms').update({phase:'answering',current_question_id:question.id,round:latest.round+1,used_question_ids:[...previousUsed,question.id],round_player_ids:latestPlayers.map(p=>p.id)})
+        .eq('id',room.id).eq('round',latest.round).eq('phase',latest.phase).select('*').maybeSingle();
+      if(publishError || !data){setError(publishError?.message || '其他主控已更新房间，请重试');await loadRoom(room.id);return;}
+      setError('');setAnswers([]);roomRef.current=data as Room;setRoom(data as Room);setTab('game');
+    } finally {publishLock.current=false;}
   }
 
   const randomPublish =
@@ -702,8 +668,7 @@ export default function Host() {
       const binaryQuestions =
         qs.filter(
           question =>
-            question.type ===
-            'binary'
+            question.type === 'binary' && question.enabled
         )
 
       if (
@@ -734,7 +699,7 @@ export default function Host() {
         !candidates.length
       ) {
         setError(
-          `本房间的 ${binaryQuestions.length} 道二选一题已经全部出完。清空房间后可以重新开始。`
+          '本局题目已经全部出完'
         )
         return
       }
@@ -803,16 +768,16 @@ export default function Host() {
           游戏设置
         </Nav>
 
-        <Nav
-          active={false}
-          onClick={() => {}}
-          icon={<Palette />}
-        >
-          外观设置
-        </Nav>
+<div className="sidebar-note"><span>✦</span><strong>好问题，更好的人。</strong><small>房主只负责主持<br/>把选择留给朋友们</small></div>
       </aside>
 
       <section className="host-content">
+        <header className="host-topbar"><div><span className="eyebrow">二选一 / HOST</span><p>今晚，让每个选择都有故事。</p></div><span className="host-badge"><Radio size={14}/>{room?'主持人模式':'主控台'}</span></header>
+        <div className="host-stats"><div><span>当前房间</span><strong>{room?.code || '—'}</strong><small>{restoring?'正在恢复房间…':room?({lobby:'等待开局',ready:'等待发题',answering:'玩家答题中',reveal:'揭晓 · 等待下一题',ended:'已结束'}[room.phase]):'创建后邀请朋友加入'}</small></div><div><span>房间玩家</span><strong>{players.length}<em> / 20</em></strong><small>主持人不参与答题</small></div><div><span>本局出题</span><strong>{getUsedQuestionIds(room).length}<em> / {qs.filter(q=>q.type==='binary').length}</em></strong><small>同一局内不重复</small></div><div><span>本轮进度</span><strong>{answers.filter(a=>a.question_id===room?.current_question_id && getRoundPlayerIds(room).includes(a.player_id)).length}<em> / {getRoundPlayerIds(room).length}</em></strong><small>仅计算本题开始时的玩家</small></div></div>
+        {error && <p role="alert" className="error global-error">{error}</p>}
+        {!configured && <p className="error">暂未连接游戏服务，请配置 Supabase 后使用。</p>}
+        {room && <button className="copy-invite" onClick={async()=>{try{await navigator.clipboard.writeText(location.origin+'/join/'+room.code);setCopied(true);setTimeout(()=>setCopied(false),2000)}catch{setError('复制失败，请复制房间卡片中的链接')}}}>{copied?<Check size={16}/>:<Copy size={16}/>} {copied?'邀请链接已复制':'复制邀请链接'}</button>}
+
         {tab ===
           'room' && (
           <RoomPanel
@@ -926,7 +891,7 @@ function RoomPanel({
   if (!room) {
     return (
       <div className="host-empty">
-        <h1>房间</h1>
+        <h1>房间控制 <small>邀请朋友，一起站队</small></h1>
 
         <div className="panel">
           <h2>
@@ -934,7 +899,7 @@ function RoomPanel({
           </h2>
 
           <p>
-            主控创建房间后，玩家才能扫码加入。
+            创建你的聚会房间，分享二维码或 4 位房间号。最多 20 位朋友一起玩。
           </p>
 
           <button
@@ -966,7 +931,7 @@ function RoomPanel({
 
   return (
     <>
-      <h1>房间</h1>
+      <h1>房间控制 <small>邀请朋友，一起站队</small></h1>
 
       <div className="room-control">
         <div className="panel room-code">
@@ -1044,9 +1009,7 @@ function RoomPanel({
                   }
                 </span>
 
-                <i>
-                  •••
-                </i>
+                <i className="player-status">已加入</i>
               </div>
             )
           )}
@@ -1108,6 +1071,7 @@ function Bank({
     question: Question
   ) => void
 }) {
+  const [status, setStatus] = useState('active');
   const [search, setSearch] =
     useState('')
 
@@ -1151,8 +1115,7 @@ function Bank({
       () =>
         qs.filter(
           question =>
-            question.type ===
-            'binary'
+            question.type === 'binary' && question.enabled
         ),
       [qs]
     )
@@ -1245,6 +1208,7 @@ function Bank({
               type
 
           return (
+            (status === 'all' || (status === 'active' && question.enabled) || (status === 'disabled' && !question.enabled) || (status === 'used' && usedIds.has(question.id)) || (status === 'unused' && question.enabled && !usedIds.has(question.id))) &&
             matchesSearch &&
             matchesCategory &&
             matchesType
@@ -1254,6 +1218,8 @@ function Bank({
     }, [
       qs,
       search,
+      status,
+      usedIds,
       category,
       type,
     ])
@@ -1434,12 +1400,12 @@ function Bank({
   ) => {
     const ok =
       window.confirm(
-        `确定删除「${question.prompt}」吗？`
+        `确定停用「${question.prompt}」吗？已出题记录会保留。`
       )
 
     if (!ok) return
 
-    await supabase
+    const {error:removeError}=await supabase
       .from('questions')
       .update({
         enabled: false,
@@ -1449,6 +1415,7 @@ function Bank({
         question.id
       )
 
+    if(removeError){setEditorError(removeError.message);return;}
     await reload()
   }
 
@@ -1575,8 +1542,8 @@ function Bank({
             </div>
           )}
 
-          <div className="filters">
-            <select
+          <div className="filters"><select aria-label="出题状态筛选" value={status} onChange={e=>setStatus(e.target.value)}><option value="active">启用题目</option><option value="all">全部题目</option><option value="unused">本局未出</option><option value="used">本局已出</option><option value="disabled">已停用</option></select>
+            <select aria-label="分类筛选"
               value={
                 category
               }
@@ -1608,7 +1575,7 @@ function Bank({
               )}
             </select>
 
-            <select
+            <select aria-label="题型筛选"
               value={type}
               onChange={
                 event =>
@@ -1647,6 +1614,7 @@ function Bank({
         </button>
       </div>
 
+      {editorError && !editorOpen && <p className="error" role="alert">{editorError}</p>}
       <div className="panel bank-list">
         <div className="bank-search">
           <Search />
@@ -1688,7 +1656,7 @@ function Bank({
 
             return (
               <div
-                className="bank-row"
+                className={"bank-row"+(used?" used-question":"")}
                 key={
                   question.id
                 }
@@ -1705,6 +1673,7 @@ function Bank({
                     minWidth: 0,
                   }}
                 >
+                  {!question.enabled && <small>已停用 · 编辑保存可重新启用</small>}
                   <b>
                     {
                       question.prompt
@@ -1796,8 +1765,9 @@ function Bank({
                     'lobby' &&
                   room.phase !==
                     'ended' &&
+                  room.phase !== 'answering' &&
                   question.type ===
-                    'binary' && (
+                    'binary' && question.enabled && (
                     <button
                       title={
                         used
@@ -1820,7 +1790,7 @@ function Bank({
                   )}
 
                 <button
-                  title="编辑"
+                  title="编辑" aria-label="编辑题目"
                   onClick={() =>
                     openEdit(
                       question
@@ -1831,7 +1801,7 @@ function Bank({
                 </button>
 
                 <button
-                  title="删除"
+                  title="停用题目" aria-label="停用题目"
                   onClick={() =>
                     void remove(
                       question
@@ -1860,7 +1830,7 @@ function Bank({
           }
         >
           <div
-            className="question-modal"
+            className="question-modal" role="dialog" aria-modal="true" aria-label="题目编辑器"
             onMouseDown={
               event =>
                 event.stopPropagation()
@@ -1880,7 +1850,7 @@ function Bank({
               </div>
 
               <button
-                className="modal-close"
+                className="modal-close" aria-label="关闭编辑器"
                 onClick={
                   closeEditor
                 }
@@ -2028,7 +1998,7 @@ function Bank({
                           1}
                     </b>
 
-                    <input
+                    <input aria-label={draft.type === 'binary' ? (index === 0 ? '选项 A' : '选项 B') : '排序项目 ' + (index + 1)}
                       value={
                         option
                       }
@@ -2161,24 +2131,15 @@ function Game({
       room
     )
 
-  const activePlayers =
-    players.filter(
-      player =>
-        activePlayerIds.includes(
-          player.id
-        )
-    )
-
   const activeAnswers =
     answers.filter(
       answer =>
-        activePlayerIds.includes(
+        answer.question_id === room?.current_question_id && activePlayerIds.includes(
           answer.player_id
         )
     )
 
-  const expectedCount =
-    activePlayers.length
+  const expectedCount = activePlayerIds.length
 
   const answeredCount =
     activeAnswers.length
@@ -2222,9 +2183,7 @@ function Game({
     const available =
       qs.filter(
         question =>
-          question.type ===
-            'binary' &&
-          !used.has(
+          question.type === 'binary' && question.enabled && !used.has(
             question.id
           )
       )
@@ -2441,33 +2400,8 @@ function Game({
         {room.phase ===
           'reveal' && (
           <>
-            <div className="result-mini">
-              <strong>
-                A{' '}
-                {Math.round(
-                  (
-                    a /
-                    total
-                  ) *
-                    100
-                )}
-                %
-              </strong>
-
-              <strong>
-                B{' '}
-                {Math.round(
-                  (
-                    b /
-                    total
-                  ) *
-                    100
-                )}
-                %
-              </strong>
-            </div>
-
-            <div className="host-comments">
+            <div className="reveal-board host-reveal">{(['A','B'] as const).map(side=><Side key={side} side={side} pct={Math.round((side==='A'?a:b)/total*100)+'%'} players={activeAnswers.filter(a=>a.choice===side).map(a=>players.find(p=>p.id===a.player_id)).filter((p):p is Player=>Boolean(p))}/>)}</div>
+            <h3>大家有话说</h3><div className="host-comments">
               {activeAnswers
                 .filter(
                   answer =>
@@ -2524,7 +2458,7 @@ function Game({
               }
             >
               <Shuffle />
-              下一题
+              随机下一题
             </button>
           </>
         )}
@@ -2538,3 +2472,8 @@ function Game({
     </>
   )
 }
+
+
+
+
+

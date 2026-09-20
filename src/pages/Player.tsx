@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 
 import { AnimalAvatar } from '../lib/avatars'
@@ -78,6 +78,11 @@ const normalizeQuestion = (
 }
 
 export default function Player() {
+  const navigate = useNavigate();
+  const [inputCode, setInputCode] = useState('');
+  const [selected, setSelected] = useState<'A' | 'B' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const actionLock = useRef(false);
   const { code = '' } =
     useParams()
 
@@ -131,6 +136,8 @@ export default function Player() {
     setLoading,
   ] = useState(true)
 
+  useEffect(() => { setSelected(null); setComment(''); }, [room?.current_question_id]);
+
   const storageKey =
     `erxuanyi_player_${code}`
 
@@ -143,11 +150,12 @@ export default function Player() {
       return answers.find(
         answer =>
           answer.player_id ===
-          me.id
+          me.id && answer.question_id === room?.current_question_id
       )
     }, [
       answers,
       me,
+      room?.current_question_id,
     ])
 
   const joined =
@@ -183,7 +191,7 @@ export default function Player() {
   const currentRoundAnswers =
     answers.filter(
       answer =>
-        currentRoundPlayerIds.includes(
+        answer.question_id === room?.current_question_id && currentRoundPlayerIds.includes(
           answer.player_id
         )
     )
@@ -205,10 +213,8 @@ export default function Player() {
       )
       .maybeSingle()
 
-    if (
-      roomError ||
-      !roomData
-    ) {
+    if (roomError) { setError('暂时无法连接房间，请刷新重试'); setLoading(false); return; }
+    if (!roomData) {
       localStorage.removeItem(
         storageKey
       )
@@ -372,6 +378,7 @@ export default function Player() {
     const roomId =
       room.id
 
+    const poll = setInterval(() => { void refresh(roomId, me ?? undefined); }, 3000);
     const channel =
       supabase
         .channel(
@@ -441,6 +448,7 @@ export default function Player() {
         .subscribe()
 
     return () => {
+      clearInterval(poll);
       void supabase.removeChannel(
         channel
       )
@@ -472,6 +480,9 @@ export default function Player() {
         return
       }
 
+      if (actionLock.current) return;
+      actionLock.current = true; setBusy(true);
+      try {
       setError('')
 
       const {
@@ -632,6 +643,7 @@ export default function Player() {
         targetRoom.id,
         newPlayer
       )
+      } finally { actionLock.current = false; setBusy(false); }
     }
 
   const submit =
@@ -670,6 +682,9 @@ export default function Player() {
         return
       }
 
+      if (actionLock.current) return;
+      actionLock.current = true; setBusy(true);
+      try {
       setError('')
 
       const {
@@ -717,1018 +732,47 @@ export default function Player() {
         room.id,
         me
       )
+      } finally { actionLock.current = false; setBusy(false); }
     }
 
-  if (loading) {
-    return (
-      <Shell>
-        <div className="wait-pill">
-          正在进入房间…
-        </div>
-      </Shell>
-    )
-  }
-
-  if (
-    !joined ||
-    !me
-  ) {
-    return (
-      <Shell>
-        <div className="brand small">
-          二选一
-        </div>
-
-        <section className="white-card">
-          <h2>
-            加入房间
-          </h2>
-
-          <label>
-            房间号
-
-            <input
-              value={code}
-              readOnly
-            />
-          </label>
-
-          <label>
-            你的名字
-
-            <input
-              placeholder="最多4个字"
-              value={name}
-              onChange={
-                event => {
-                  const next =
-                    Array.from(
-                      event
-                        .target
-                        .value
-                    )
-                      .slice(
-                        0,
-                        4
-                      )
-                      .join(
-                        ''
-                      )
-
-                  setName(
-                    next
-                  )
-                }
-              }
-              maxLength={
-                8
-              }
-            />
-          </label>
-
-          <button
-            className="primary"
-            disabled={
-              !name.trim() ||
-              !configured
-            }
-            onClick={() => {
-              void join()
-            }}
-          >
-            加入房间
-          </button>
-
-          {error && (
-            <p className="error">
-              {error}
-            </p>
-          )}
-        </section>
-      </Shell>
-    )
-  }
-
-  if (!room) {
-    return null
-  }
-
-  if (
-    room.phase ===
-    'ended'
-  ) {
-    return (
-      <Shell>
-        <Header
-          code={code}
-          round="已结束"
-        />
-
-        <section className="white-card">
-          <h2>
-            本场游戏已结束
-          </h2>
-
-          <p>
-            感谢参与 ✨
-          </p>
-        </section>
-      </Shell>
-    )
-  }
-
-  if (
-    room.phase ===
-    'lobby'
-  ) {
-    return (
-      <Shell>
-        <Header
-          code={code}
-          round="等待开局"
-        />
-
-        <div className="player-welcome">
-          <h2>
-            欢迎加入！
-          </h2>
-
-          <p>
-            这是你的专属头像
-          </p>
-
-          <AnimalAvatar
-            index={
-              me.avatar
-            }
-            size={118}
-          />
-
-          <strong>
-            {me.name}
-          </strong>
-        </div>
-
-        <PlayerGrid
-          players={
-            players
-          }
-        />
-
-        <div className="wait-pill">
-          等待房主开始…
-        </div>
-      </Shell>
-    )
-  }
-
-  if (
-    room.phase ===
-      'ready' ||
-    !question
-  ) {
-    return (
-      <Shell>
-        <Header
-          code={code}
-          round="游戏已开启"
-        />
-
-        <PlayerGrid
-          players={
-            players
-          }
-        />
-
-        <div className="wait-pill">
-          房主正在选择第一题…
-        </div>
-      </Shell>
-    )
-  }
-
-  /*
-   * 当前题开始后才加入。
-   */
-  if (
-    room.phase ===
-      'answering' &&
-    !isCurrentRoundPlayer
-  ) {
-    return (
-      <Shell>
-        <Header
-          code={code}
-          round={
-            `第 ${room.round} 题`
-          }
-        />
-
-        <div className="player-welcome">
-          <AnimalAvatar
-            index={
-              me.avatar
-            }
-            size={96}
-          />
-
-          <strong>
-            {me.name}
-          </strong>
-        </div>
-
-        <div className="wait-pill">
-          本题已经开始
-
-          <br />
-
-          <small>
-            你将从下一题开始参与 ✨
-          </small>
-        </div>
-      </Shell>
-    )
-  }
-
-  if (
-    room.phase ===
-      'answering' &&
-    !myAnswer
-  ) {
-    return (
-      <Shell>
-        <Header
-          code={code}
-          round={
-            `第 ${room.round} 题`
-          }
-        />
-
-        <section className="question-card">
-          <div className="must">
-            必须选一个
-          </div>
-
-          <h2>
-            {
-              question.prompt
-            }
-          </h2>
-
-          <button
-            className="option a"
-            onClick={() => {
-              void submit(
-                'A'
-              )
-            }}
-          >
-            {
-              question
-                .options[0]
-                ?.label
-            }
-          </button>
-
-          <b className="vs">
-            VS
-          </b>
-
-          <button
-            className="option b"
-            onClick={() => {
-              void submit(
-                'B'
-              )
-            }}
-          >
-            {
-              question
-                .options[1]
-                ?.label
-            }
-          </button>
-
-          <label className="comment-label">
-            💬 我有话说
-            <span>
-              （可选）
-            </span>
-
-            <textarea
-              value={
-                comment
-              }
-              onChange={
-                event =>
-                  setComment(
-                    event
-                      .target
-                      .value
-                  )
-              }
-              placeholder="补一句条件、吐槽或者嘴硬…"
-              maxLength={
-                80
-              }
-            />
-
-            <small>
-              {
-                comment.length
-              }
-              /80
-            </small>
-          </label>
-
-          {error && (
-            <p className="error">
-              {error}
-            </p>
-          )}
-        </section>
-      </Shell>
-    )
-  }
-
-  if (
-    room.phase ===
-      'answering' &&
-    myAnswer
-  ) {
-    return (
-      <Shell>
-        <Header
-          code={code}
-          round={
-            `第 ${room.round} 题`
-          }
-        />
-
-        <h1 className="count">
-          {
-            currentRoundAnswers
-              .length
-          }
-          {' / '}
-          {
-            currentRoundPlayers
-              .length
-          }
-        </h1>
-
-        <Floaters
-          players={
-            currentRoundPlayers
-          }
-        />
-
-        <div className="wait-pill">
-          你已选择{' '}
-          {
-            myAnswer.choice
-          }
-
-          <br />
-
-          <small>
-            等待其他玩家…
-            <br />
-            本轮所有人选择后自动揭晓
-          </small>
-        </div>
-      </Shell>
-    )
-  }
-
-  /*
-   * 揭晓
-   */
-  const aPlayers =
-    currentRoundAnswers
-      .filter(
-        answer =>
-          answer.choice ===
-          'A'
-      )
-      .map(
-        answer =>
-          players.find(
-            player =>
-              player.id ===
-              answer.player_id
-          )
-      )
-      .filter(
-        (
-          player
-        ): player is PlayerType =>
-          Boolean(
-            player
-          )
-      )
-
-  const bPlayers =
-    currentRoundAnswers
-      .filter(
-        answer =>
-          answer.choice ===
-          'B'
-      )
-      .map(
-        answer =>
-          players.find(
-            player =>
-              player.id ===
-              answer.player_id
-          )
-      )
-      .filter(
-        (
-          player
-        ): player is PlayerType =>
-          Boolean(
-            player
-          )
-      )
-
-  const total =
-    currentRoundAnswers
-      .length ||
-    1
-
-  const comments =
-    currentRoundAnswers.filter(
-      answer =>
-        answer.comment &&
-        answer.comment.trim()
-    )
-
-  return (
-    <Shell>
-      <Header
-        code={code}
-        round={
-          `第 ${room.round} 题`
-        }
-      />
-
-      <h1 className="reveal-title">
-        揭晓！
-      </h1>
-      {/* 揭晓时继续显示题目和具体选项 */}
-<section
-  style={{
-    background: '#ffffff',
-    borderRadius: 20,
-    padding: '16px 14px 14px',
-    marginBottom: 14,
-    color: '#172033',
-    border: '1px solid rgba(20, 28, 45, 0.08)',
-    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.08)',
-  }}
->
-  <div
-    style={{
-      fontSize: 16,
-      lineHeight: 1.5,
-      fontWeight: 800,
-      textAlign: 'center',
-      color: '#172033',
-      marginBottom: 14,
-      wordBreak: 'break-word',
-    }}
-  >
-    {question.prompt}
-  </div>
-
-  <div
-    style={{
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: 10,
-    }}
-  >
-    <div
-      style={{
-        background: '#fff0f4',
-        border: '1px solid #ffd5e0',
-        borderRadius: 12,
-        padding: '11px 8px',
-        color: '#b92f5d',
-        textAlign: 'center',
-        fontSize: 14,
-        lineHeight: 1.4,
-        fontWeight: 800,
-        wordBreak: 'break-word',
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          opacity: 0.7,
-          marginBottom: 4,
-        }}
-      >
-        A
-      </div>
-
-      {question.options[0]?.label}
-    </div>
-
-    <div
-      style={{
-        background: '#eef3ff',
-        border: '1px solid #d7e0ff',
-        borderRadius: 12,
-        padding: '11px 8px',
-        color: '#3856b5',
-        textAlign: 'center',
-        fontSize: 14,
-        lineHeight: 1.4,
-        fontWeight: 800,
-        wordBreak: 'break-word',
-      }}
-    >
-      <div
-        style={{
-          fontSize: 11,
-          opacity: 0.7,
-          marginBottom: 4,
-        }}
-      >
-        B
-      </div>
-
-      {question.options[1]?.label}
-    </div>
-  </div>
-</section>
-
-
-      <div className="reveal-board">
-        <Side
-          side="A"
-          pct={`${Math.round(
-            (
-              aPlayers.length /
-              total
-            ) *
-              100
-          )}%`}
-          players={
-            aPlayers
-          }
-        />
-
-        <Side
-          side="B"
-          pct={`${Math.round(
-            (
-              bPlayers.length /
-              total
-            ) *
-              100
-          )}%`}
-          players={
-            bPlayers
-          }
-        />
-      </div>
-
-      <AnimatePresence>
-        {comments.map(
-          (
-            answer,
-            index
-          ) => {
-            const player =
-              players.find(
-                item =>
-                  item.id ===
-                  answer.player_id
-              )
-
-            return (
-              <motion.div
-                key={
-                  answer.id
-                }
-                className="flying-comment"
-                style={{
-                  top:
-                    80 +
-                    (
-                      index %
-                      5
-                    ) *
-                      42,
-                }}
-                initial={{
-                  x:
-                    '100vw',
-                  opacity:
-                    0,
-                }}
-                animate={{
-                  x:
-                    '-110vw',
-                  opacity: [
-                    0,
-                    1,
-                    1,
-                    0,
-                  ],
-                }}
-                transition={{
-                  duration:
-                    6,
-                  delay:
-                    index *
-                    0.45,
-                }}
-              >
-                <AnimalAvatar
-                  index={
-                    player
-                      ?.avatar ??
-                    0
-                  }
-                  size={34}
-                />
-
-                {
-                  answer.comment
-                }
-              </motion.div>
-            )
-          }
-        )}
-      </AnimatePresence>
-
-      <section className="discussion">
-        <h3>
-          大家有话说
-        </h3>
-
-        {comments.length ===
-          0 && (
-          <p className="muted">
-            这一题大家都很安静 👀
-          </p>
-        )}
-
-        {comments.map(
-          answer => {
-            const player =
-              players.find(
-                item =>
-                  item.id ===
-                  answer.player_id
-              )
-
-            return (
-              <p
-                key={
-                  answer.id
-                }
-              >
-                <AnimalAvatar
-                  index={
-                    player
-                      ?.avatar ??
-                    0
-                  }
-                  size={30}
-                />
-
-                <b>
-                  {
-                    player
-                      ?.name ??
-                    '玩家'
-                  }
-                  ：
-                </b>
-
-                {
-                  answer.comment
-                }
-              </p>
-            )
-          }
-        )}
-      </section>
-
-      <div className="wait-pill">
-        等待房主进入下一题…
-      </div>
-    </Shell>
-  )
+  if (loading) return <Shell><div className="wait-pill">正在恢复你的房间…</div></Shell>;
+  if (!joined || !me) return <Shell>
+    <div className="join-intro"><span className="eyebrow">今晚，你站哪边？</span><h1 className="brand">二选一<span>✦</span></h1><p>好问题，更好的人。</p></div>
+    <section className="white-card join-card"><h2>加入房间</h2><p className="card-subtitle">选一个答案，认识另一面的朋友。</p>
+      <label>房间号<input inputMode="numeric" pattern="[0-9]{4}" maxLength={4} value={code || inputCode} readOnly={Boolean(code)} placeholder="输入 4 位房间号" onChange={e=>setInputCode(e.target.value.replace(/\D/g,''))}/></label>
+      {code && <label>你的名字 <small>最多 4 个字</small><input autoComplete="nickname" placeholder="大家怎么称呼你？" value={name} onChange={e=>setName(Array.from(e.target.value).slice(0,4).join(''))}/></label>}
+      <button className="primary" disabled={busy || (code ? !name.trim() || !configured : inputCode.length !== 4)} onClick={()=>code ? void join() : navigate('/join/'+inputCode)}>{busy?'正在加入…':code?'加入房间 →':'下一步 →'}</button>
+      {!configured && code && <p className="error">暂未连接游戏服务，请联系房主。</p>}{error && <p role="alert" className="error">{error}</p>}
+    </section><div className="mascot-row" aria-hidden="true">{[0,1,6].map((a,i)=><AnimalAvatar key={a} index={a} size={i===1?100:78}/>)}</div><a className="host-link" href="/host">我是房主，打开主控台 ↗</a>
+  </Shell>;
+  if (!room) return null;
+  const header=<Header code={code} round={room.round ? '第 '+room.round+' 题' : '等待开局'}/>;
+  if (room.phase==='ended') return <Shell>{header}<div className="player-welcome"><AnimalAvatar index={me.avatar} size={112}/><h1>下次再站队！</h1><p>本场游戏已结束，感谢每一个选择。</p><a className="primary" href="/join">加入其他房间</a></div></Shell>;
+  if (room.phase==='lobby' || room.phase==='ready') return <Shell>{header}
+    <div className="lobby-heading"><span className="eyebrow">欢迎来到二选一</span><h1>房间号 <strong>{room.code}</strong></h1><p>{players.length} / 20 位朋友已加入</p></div>
+    <div className="my-identity"><AnimalAvatar index={me.avatar} size={76}/><div><small>你的专属头像</small><strong>{me.name}<em>我</em></strong></div></div>
+    <PlayerGrid players={players}/><div className="wait-pill"><span className="live-dot"/>{room.phase==='lobby'?'等待房主开启游戏…':'房主正在挑选第一题…'}<small>朋友到齐，好戏开场。</small></div>
+  </Shell>;
+  if (!question || question.id !== room.current_question_id) return <Shell>{header}<div className="wait-pill">正在加载题目…</div></Shell>;
+  if (room.phase==='answering' && !isCurrentRoundPlayer) return <Shell>{header}<div className="player-welcome"><AnimalAvatar index={me.avatar} size={128}/><strong>{me.name}</strong><h1>来得正好！</h1></div><div className="wait-pill">本题已经开始<small>你将从下一题开始参与</small></div></Shell>;
+  if (room.phase==='answering' && !myAnswer) return <Shell>{header}<section className="question-card"><div className="must">二选一 · 必须选一个</div><h2>{question.prompt}</h2>
+    <div className="choice-options">{(['A','B'] as const).map((side,i)=><button key={side} aria-pressed={selected===side} className={'option '+side.toLowerCase()+(selected===side?' selected':'')} disabled={busy} onClick={()=>setSelected(side)}><span className="option-letter">{side}</span><span>{question.options[i]?.label}</span><span className="choice-check">{selected===side?'✓':'○'}</span></button>)}</div>
+    <label className="comment-label">我有话说 <span>（可选吐槽）</span><textarea disabled={busy} value={comment} onChange={e=>setComment(e.target.value)} placeholder="为什么站这边？说说你的理由…" maxLength={80}/><small>{comment.length} / 80</small></label>
+    <button className={'primary submit-choice '+(selected?.toLowerCase()||'')} disabled={!selected || busy} onClick={()=>selected && void submit(selected)}>{busy?'正在提交…':selected?'确认选 '+selected+' →':'先选一边吧'}</button><p className="submit-hint">每题只能提交一次，提交后不能修改</p>{error && <p className="error" role="alert">{error}</p>}
+  </section></Shell>;
+  if (room.phase==='answering' && myAnswer) return <Shell>{header}<h1 className="count">{currentRoundAnswers.length}<span> / {currentRoundPlayerIds.length}</span></h1><Floaters players={currentRoundPlayers}/><div className="wait-pill">你已选择 <b className={'my-choice '+myAnswer.choice?.toLowerCase()}>{myAnswer.choice}</b><small>等待其他玩家…<br/>本轮所有人选择后自动揭晓</small></div></Shell>;
+  const sidePlayers=(side:string)=>currentRoundAnswers.filter(a=>a.choice===side).map(a=>players.find(p=>p.id===a.player_id)).filter((p):p is PlayerType=>Boolean(p));
+  const comments=currentRoundAnswers.filter(a=>a.comment?.trim());
+  return <Shell>{header}<h1 className="reveal-title">揭晓！<span>看看谁和你站在一起</span></h1><section className="reveal-question"><h2>{question.prompt}</h2><div className="reveal-options">{question.options.slice(0,2).map((o,i)=><p key={o.id} className={i?'b':'a'}><b>{i?'B':'A'}</b>{o.label}</p>)}</div></section>
+    <div className="reveal-board">{(['A','B'] as const).map(side=><Side key={side} side={side} players={sidePlayers(side)} pct={Math.round(currentRoundAnswers.filter(a=>a.choice===side).length/(currentRoundAnswers.length||1)*100)+'%'} meId={me.id}/>)}</div>
+    <AnimatePresence>{comments.slice(0,20).map((a,i)=><motion.div key={a.id || a.player_id} className="flying-comment" style={{top:100+(i%4)*48}} initial={{x:'100vw',opacity:0}} animate={{x:'-120vw',opacity:[0,1,1,0]}} transition={{duration:9,delay:i*.8}}><AnimalAvatar index={players.find(p=>p.id===a.player_id)?.avatar} size={28}/>{a.comment}</motion.div>)}</AnimatePresence>
+    <section className="discussion"><h3>大家有话说 <small>{comments.length} 条</small></h3>{!comments.length && <p className="muted">这一题，大家选择用行动表态。</p>}{comments.map(a=>{const p=players.find(p=>p.id===a.player_id);return <div className="comment-row" key={a.id || a.player_id}><AnimalAvatar index={p?.avatar} size={32}/><div><b>{p?.name || '玩家'}<em className={a.choice?.toLowerCase()}>选 {a.choice}</em></b><p>{a.comment}</p></div></div>})}</section><div className="wait-pill">等待房主进入下一题…</div>
+  </Shell>;
 }
+function PlayerGrid({players}:{players:PlayerType[]}){return <div className="avatar-grid">{players.map(p=><div key={p.id}><AnimalAvatar index={p.avatar}/><span>{p.name}</span></div>)}</div>}
+export function Shell({children}:{children:React.ReactNode}){return <main className="star-bg phone-page"><div className="confetti" aria-hidden="true">{Array.from({length:16},(_,i)=><i key={i} style={{left:(i*37%97)+'%',top:(i*19%96)+'%',rotate:(i*43)+'deg',background:['#ff7eae','#75dfff','#ffd378','#a89aff'][i%4]}}/>)}</div><div className="phone-shell">{children}</div></main>}
+function Header({code,round}:{code:string;round:string}){return <header className="player-head"><span className="mini-brand">二选一</span><span>{round}</span><span className="room-tag">#{code}</span></header>}
+function Floaters({players}:{players:PlayerType[]}){return <div className="float-zone">{players.map((p,i)=><motion.div key={p.id} className="floater" animate={{y:[0,i%2?7:-7,0]}} transition={{duration:3+i*.12,repeat:Infinity}}><AnimalAvatar index={p.avatar} size={48}/><span>{p.name}</span></motion.div>)}</div>}
+export function Side({side,pct,players,meId}:{side:'A'|'B';pct:string;players:PlayerType[];meId?:string}){return <section className={'reveal-side '+side.toLowerCase()}><header><b>{side}</b><strong>{pct}</strong><span>{players.length} 人</span></header><div className="side-roster">{players.map((p,i)=><motion.div key={p.id} initial={{opacity:0,y:12}} animate={{opacity:1,y:0}} transition={{delay:i*.035}} className={p.id===meId?'is-me':''}><AnimalAvatar index={p.avatar} size={32}/><span>{p.name}</span></motion.div>)}</div>{!players.length&&<p className="empty-side">这边暂时无人站队</p>}</section>}
 
-function PlayerGrid({
-  players,
-}: {
-  players: PlayerType[]
-}) {
-  return (
-    <div className="avatar-grid">
-      {players.map(
-        player => (
-          <div
-            key={
-              player.id
-            }
-          >
-            <AnimalAvatar
-              index={
-                player.avatar
-              }
-            />
 
-            <span>
-              {
-                player.name
-              }
-            </span>
-          </div>
-        )
-      )}
-    </div>
-  )
-}
-
-function Shell({
-  children,
-}: {
-  children: React.ReactNode
-}) {
-  return (
-    <main className="star-bg phone-page">
-      <div className="phone-shell">
-        {children}
-      </div>
-    </main>
-  )
-}
-
-function Header({
-  code,
-  round,
-}: {
-  code: string
-  round: string
-}) {
-  return (
-    <header className="player-head">
-      <span className="mini-brand">
-        二选一
-      </span>
-
-      <span>
-        {round}
-      </span>
-
-      <span>
-        #{code}
-      </span>
-    </header>
-  )
-}
-
-function Floaters({
-  players,
-}: {
-  players: PlayerType[]
-}) {
-  return (
-    <div className="float-zone">
-      {players.map(
-        (
-          player,
-          index
-        ) => (
-          <motion.div
-            key={
-              player.id
-            }
-            className="floater"
-            style={{
-              left: `${
-                12 +
-                (
-                  index *
-                  23
-                ) %
-                  72
-              }%`,
-              top: `${
-                12 +
-                (
-                  index *
-                  31
-                ) %
-                  70
-              }%`,
-            }}
-            animate={{
-              x: [
-                0,
-                index %
-                  2
-                  ? 12
-                  : -10,
-                0,
-              ],
-              y: [
-                0,
-                index %
-                  3
-                  ? 8
-                  : -12,
-                0,
-              ],
-            }}
-            transition={{
-              duration:
-                3 +
-                index *
-                  0.25,
-              repeat:
-                Infinity,
-              ease:
-                'easeInOut',
-            }}
-          >
-            <AnimalAvatar
-              index={
-                player.avatar
-              }
-              size={48}
-            />
-
-            <span>
-              {
-                player.name
-              }
-            </span>
-          </motion.div>
-        )
-      )}
-    </div>
-  )
-}
-
-/*
- * 紧凑揭晓区。
- *
- * 不再给每个人单独做气泡。
- * 每边 4 列，20 人 = 5 行。
- * 保留头像 + 最多4字名字。
- */
-function Side({
-  side,
-  pct,
-  players,
-}: {
-  side: 'A' | 'B'
-  pct: string
-  players: PlayerType[]
-}) {
-  const isA =
-    side === 'A'
-
-  return (
-    <div
-      className={
-        `reveal-side ${side.toLowerCase()}`
-      }
-      style={{
-        padding:
-          '10px 6px 12px',
-        minWidth: 0,
-      }}
-    >
-      <h2
-        style={{
-          marginBottom:
-            10,
-        }}
-      >
-        {side}
-
-        <strong>
-          {pct}
-          {' · '}
-          {players.length}
-          人
-        </strong>
-      </h2>
-
-      <div
-        style={{
-          display:
-            'grid',
-          gridTemplateColumns:
-            'repeat(4, minmax(0, 1fr))',
-          columnGap:
-            3,
-          rowGap:
-            9,
-          alignItems:
-            'start',
-        }}
-      >
-        {players.map(
-          (
-            player,
-            index
-          ) => (
-            <motion.div
-              key={
-                player.id
-              }
-              initial={{
-                x:
-                  isA
-                    ? 35
-                    : -35,
-                y: -15,
-                opacity:
-                  0,
-              }}
-              animate={{
-                x: 0,
-                y: 0,
-                opacity:
-                  1,
-              }}
-              transition={{
-                delay:
-                  index *
-                  0.05,
-                type:
-                  'spring',
-              }}
-              style={{
-                display:
-                  'flex',
-                flexDirection:
-                  'column',
-                alignItems:
-                  'center',
-                minWidth:
-                  0,
-                background:
-                  'transparent',
-                border:
-                  'none',
-                boxShadow:
-                  'none',
-                padding:
-                  0,
-              }}
-            >
-              <AnimalAvatar
-                index={
-                  player.avatar
-                }
-                size={29}
-              />
-
-              <span
-                style={{
-                  display:
-                    'block',
-                  width:
-                    '100%',
-                  marginTop:
-                    3,
-                  textAlign:
-                    'center',
-                  fontSize:
-                    10,
-                  lineHeight:
-                    1.15,
-                  fontWeight:
-                    700,
-                  whiteSpace:
-                    'nowrap',
-                  overflow:
-                    'hidden',
-                  textOverflow:
-                    'ellipsis',
-                }}
-              >
-                {
-                  player.name
-                }
-              </span>
-            </motion.div>
-          )
-        )}
-      </div>
-    </div>
-  )
-}
